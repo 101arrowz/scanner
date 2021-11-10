@@ -1,0 +1,25 @@
+{
+  "name": "scanner",
+  "version": "0.0.1",
+  "description": "Document scanner",
+  "repository": "https://github.com/101arrowz/scanner",
+  "author": "Arjun Barrett",
+  "license": "MIT",
+  "scripts": {
+    "start": "parcel src/index.html",
+    "build": "parcel build src/index.html"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.5.0",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "devDependencies": {
+    "@parcel/packager-raw-url": "^2.0.1",
+    "@types/react": "^17.0.34",
+    "@types/react-dom": "^17.0.11",
+    "parcel": "^2.0.1",
+    "parcel-config-pwa-manifest": "^0.1.0",
+    "typescript": "^4.4.4"
+  }
+}

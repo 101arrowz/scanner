@@ -1,0 +1,11 @@
+{
+  "name": "Document Scanner",
+  "disabled": true,
+  "iconGenOpts": {
+    "baseIcon": "src/icon.png",
+    "genFavicons": true
+  },
+  "production": {
+    "disabled": false
+  }
+}

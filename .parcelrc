@@ -1,0 +1,6 @@
+{
+    "extends": ["@parcel/config-default", "parcel-config-pwa-manifest"],
+    "packagers": {
+        "*.xml": "@parcel/packager-raw-url"
+    }
+}
