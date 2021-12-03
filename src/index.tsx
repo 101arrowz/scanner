@@ -65,7 +65,7 @@ const convolver = (matrix: Float32Array, radius: number) =>
   (src: Float32Array, width: number, height: number, dst?: Float32Array) =>
     convolve(src, width, height, matrix, radius, dst);
 
-const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer)) => {
+const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer, src.byteOffset, src.byteLength >> 2)) => {
   for (let px = 0; px < dst.length; ++px) {
     const pos = px << 2;
     dst[px] = src[pos] * 0.00116796875 + src[pos + 1] * 0.00229296875 + src[pos + 2] * 0.0004453125;
@@ -73,14 +73,14 @@ const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer)) =
   return dst;
 }
 
-const channel = (src: Uint8ClampedArray, channel: 0 | 1 | 2, dst = new Float32Array(src.buffer)) => {
+const channel = (src: Uint8ClampedArray, channel: 0 | 1 | 2, dst = new Float32Array(src.buffer, src.byteOffset, src.byteLength >> 2)) => {
   for (let px = 0; px < dst.length; ++px) {
     dst[px] = src[(px << 2) + channel] / 255;
   }
   return dst;
 }
 
-const grayscaleToRGB = (src: Float32Array, dst = new Uint8ClampedArray(src.buffer)) => {
+const grayscaleToRGB = (src: Float32Array, dst = new Uint8ClampedArray(src.buffer, src.byteOffset, src.byteLength)) => {
   for (let px = 0; px < src.length; ++px) {
     const pos = px << 2;
     dst[pos] = dst[pos + 1] = dst[pos + 2] = src[px] * 255;
@@ -91,9 +91,9 @@ const grayscaleToRGB = (src: Float32Array, dst = new Uint8ClampedArray(src.buffe
 
 // TODO: optimize these with manual implementations for better perf
 const sobelX = convolver(new Float32Array([
-  1.0, 0.0, -1.0,
-  2.0, 0.0, -2.0,
-  1.0, 0.0, -1.0
+  -1.0, 0.0, 1.0,
+  -2.0, 0.0, 2.0,
+  -1.0, 0.0, 1.0
 ]), 1);
 
 const sobelY = convolver(new Float32Array([
@@ -172,54 +172,430 @@ const canny = (src: Float32Array, width: number, height: number, dst = src, scra
   return dst;
 }
 
-const cos = new Float32Array(45);
-const sin = new Float32Array(45);
-for (let t = 0; t < 45; ++t) {
-  const theta = Math.PI * t / 45;
+const cos = new Float32Array(256);
+const sin = new Float32Array(256);
+for (let t = 0; t < 256; ++t) {
+  const theta = Math.PI * t / 256;
   cos[t] = Math.cos(theta);
   sin[t] = Math.sin(theta);
 }
 
-const houghLines = (src: Float32Array, width: number, height: number, dst = new Float32Array(src.length)) => {
+const HOUGH_MATCH_RATIO = 1 / 40;
+
+const houghLinesUnoptimized = (src: Float32Array, width: number, height: number, dst = new Float32Array(src.length)) => {
   const diag = Math.hypot(width, height);
-  const maxDiag = Math.ceil(diag);
-  const buf = new Float32Array(45 * maxDiag);
+  const numBins = Math.floor(diag);
+  gaussianBlur(src, width, height, dst);
+  const scratch = new Float32Array((dst.length << 1) + (numBins << 8));
+  const sobelXResult = sobelX(dst, width, height, scratch.subarray(0, dst.length));
+  const sobelYResult = sobelY(dst, width, height, scratch.subarray(dst.length, dst.length << 1));
+  const buf = scratch.subarray((dst.length << 1));
   for (let i = 0; i < height; ++i) {
     for (let j = 0; j < width; ++j) {
       const px = i * width + j;
-      const edge = src[px];
-      if (edge > 0.2) {
-        for (let t = 0; t < 45; ++t) {
-          let bin = (i * cos[t] + j * sin[t] + diag) >> 1;
-          buf[t * maxDiag + bin] += edge;
+      const sx = sobelXResult[px], sy = sobelYResult[px];
+      const dir = sy / sx;
+      const grad = Math.hypot(sx, sy);
+      // Add 128 to fix range. Note that this requires rotating the coordinate system
+      let angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
+      // Two shifts because otherwise indexing is messed up by in-between values
+      const bin = (cos[angle] * i + sin[angle] * j + diag) >> 1;
+      buf[(bin << 8) + angle] += grad;
+      dst[px] = grad;
+    }
+  }
+  const ctx = plot(grayscaleToRGB(dst), width, height);
+  let max = 0.0;
+  for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
+  type Line = { b: number; a: number; s: number; }
+  for (let threshold = max * 0.2;; threshold *= 0.5) {
+    const lines: Line[] = [];
+    for (let bin = 0; bin < numBins; ++bin) {
+      for (let angle = 0; angle < 256; ++angle) {
+        const ind = (bin << 8) + angle;
+        let val = buf[ind];
+        if (val > threshold) lines.push({ b: bin, a: angle, s: val });
+      }
+    }
+    for (let i = 0; i < lines.length; ++i) {
+      const { b: l1b, a: l1a, s: l1s } = lines[i];
+      let bin = l1b * l1s, angle = l1a * l1s, strength = l1s;
+      for (let j = i + 1; j < lines.length; ++j) {
+        const { b, a, s } = lines[j];
+        if (Math.abs(l1b - b) < numBins * HOUGH_MATCH_RATIO && Math.abs(l1a - a) < 256 * HOUGH_MATCH_RATIO) {
+          bin += b * s;
+          angle += a * s;
+          strength += s;
+          lines.splice(j, 1);
+          --j;
+        }
+      }
+      lines[i] = {
+        b: bin / strength,
+        a: angle / strength,
+        s: strength
+      };
+    }
+    for (const { b, a, s } of lines) {
+      const bin = Math.round(b), angle = a * Math.PI / 256;
+      ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const rho = (bin << 1) - diag;
+      const x = s * rho, y = c * rho;
+      ctx.moveTo(x + c * 1000, y - s * 1000);
+      ctx.lineTo(x - c * 1000, y + s * 1000);
+      ctx.stroke();
+    }
+    if (lines.length > 4) break;
+  }
+  return dst;
+}
+
+// logic stolen from https://math.stackexchange.com/a/339033
+
+// 3x3 matrix adjugate
+const adj3 = (src: Float32Array, dst = new Float32Array(9)) => {
+  dst[0] = src[4] * src[8] - src[5] * src[7];
+  dst[1] = src[2] * src[7] - src[1] * src[8];
+  dst[2] = src[1] * src[5] - src[2] * src[4];
+  dst[3] = src[5] * src[6] - src[3] * src[8];
+  dst[4] = src[0] * src[8] - src[2] * src[6];
+  dst[5] = src[2] * src[3] - src[0] * src[5];
+  dst[6] = src[3] * src[7] - src[4] * src[6];
+  dst[7] = src[1] * src[6] - src[0] * src[7];
+  dst[8] = src[0] * src[4] - src[1] * src[3];
+  return dst;
+}
+
+// 3x3 matrix multiplication
+const mul3 = (a: Float32Array, b: Float32Array, dst = new Float32Array(9)) => {
+  dst[0] = a[0] * b[0] + a[1] * b[3] + a[2] * b[6];
+  dst[1] = a[0] * b[1] + a[1] * b[4] + a[2] * b[7];
+  dst[2] = a[0] * b[2] + a[1] * b[5] + a[2] * b[8];
+  dst[3] = a[3] * b[0] + a[4] * b[3] + a[5] * b[6];
+  dst[4] = a[3] * b[1] + a[4] * b[4] + a[5] * b[7];
+  dst[5] = a[3] * b[2] + a[4] * b[5] + a[5] * b[8];
+  dst[6] = a[6] * b[0] + a[7] * b[3] + a[8] * b[6];
+  dst[7] = a[6] * b[1] + a[7] * b[4] + a[8] * b[7];
+  dst[8] = a[6] * b[2] + a[7] * b[5] + a[8] * b[8];
+  return dst;
+};
+
+// 3x3 matrix multiplication with 3-vector
+const mul3v = (a: Float32Array, b: Float32Array, dst = new Float32Array(3)) => {
+  dst[0] = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  dst[1] = a[3] * b[0] + a[4] * b[1] + a[5] * b[2];
+  dst[2] = a[6] * b[0] + a[7] * b[1] + a[8] * b[2];
+  return dst;
+};
+
+type Point = { x: number, y: number; };
+type Quad = { a: Point; b: Point; c: Point; d: Point; };
+
+// matrix that maps basis vectors to points
+const basisToPoints = ({ a, b, c, d }: Quad) => {
+  const m = new Float32Array([
+    a.x, b.x, c.x,
+    a.y, b.y, c.y,
+    1,   1,   1
+  ]);
+  const coeffs = mul3v(adj3(m), new Float32Array([d.x, d.y, 1]));
+  // Multiply values by coefficients
+  return mul3(m, new Float32Array([
+    coeffs[0], 0, 0,
+    0, coeffs[1], 0,
+    0, 0, coeffs[2]
+  ]));
+}
+
+const createProjector = (from: Quad, to: Quad) => {
+  const srcBasis = basisToPoints(from), dstBasis = basisToPoints(to);
+  const proj = mul3(dstBasis, adj3(srcBasis));
+  return (point: Point): Point => {
+    const projected = mul3v(proj, new Float32Array([point.x, point.y, 1]));
+    return {
+      x: projected[0] / projected[2],
+      y: projected[1] / projected[2]
+    };
+  };
+}
+
+const sortQuad = ({ a, b, c, d }: Quad): Quad => {
+  const side = Math.hypot(a.x - b.x, a.y - b.y) + Math.hypot(c.x - d.x, c.y - d.y);
+  const top = Math.hypot(b.x - c.x, b.y - c.y) + Math.hypot(d.x - a.x, d.y - a.y);
+  // ab or cd
+  if (side > top) {
+    const avgABx = (a.x + b.x) / 2;
+    const avgCDx = (c.x + d.x) / 2;
+    if (avgABx < avgCDx) {
+      return a.y > b.y
+        ? { a: a, b: b, c: c, d: d }
+        : { a: b, b: a, c: d, d: c };
+    } else {
+      return c.y > d.y
+        ? { a: c, b: d, c: a, d: b }
+        : { a: d, b: c, c: b, d: a };
+    }
+  } else {
+    const avgBCx = (b.x + c.x) / 2;
+    const avgDAx = (a.x + d.x) / 2;
+    if (avgBCx < avgDAx) {
+      return b.y > c.y
+        ? { a: b, b: c, c: d, d: a }
+        : { a: c, b: b, c: a, d: d };
+    } else {
+      return d.y > a.y
+        ? { a: d, b: a, c: b, d: c }
+        : { a: a, b: d, c: c, d: b };
+    }
+  }
+}
+
+
+const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
+  const diag = Math.hypot(width, height);
+  const numBins = Math.floor(diag);
+  const src = grayscale(rgb, new Float32Array(rgb.length >> 2));
+  const scratch = new Float32Array((src.length << 1) + (numBins << 8));
+  const dst = scratch.subarray(0, src.length);
+  const gradBuf = scratch.subarray(src.length, src.length << 1);
+  gaussianBlur(src, width, height, dst);
+  const buf = scratch.subarray(src.length << 1);
+  const east = 1, southwest = width - 1, south = width, southeast = width + 1;
+  const iim = height - 1, jim = width - 1;
+  for (let i = 1; i < iim; ++i) {
+    for (let j = 1; j < jim; ++j) {
+      const px = i * width + j;
+      const nw = dst[px - southeast], n = dst[px - south], ne = dst[px - southwest], w = dst[px - east],
+            e = dst[px + east], sw = dst[px + southwest], s = dst[px + south], se = dst[px + southeast];
+      const sx = 2 * (e - w) + ne + se - nw - sw;
+      const sy = 2 * (n - s) + ne + nw - se - sw;
+      const dir = sy / sx;
+      const grad = Math.hypot(sx, sy);
+      // Add 128 to fix range. Note that this requires rotating the coordinate system
+      let angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
+      // Two shifts because otherwise indexing is messed up by in-between values
+      const bin = (cos[angle] * i + sin[angle] * j + diag) >> 1;
+      buf[(bin << 8) + angle] += grad;
+      gradBuf[px] = grad;
+    }
+  }
+  type Line = { b: number; a: number; s: number; };
+  const ctx = plot(grayscaleToRGB(dst, new Uint8ClampedArray(dst.length << 2)), width, height);
+  let max = 0.0;
+  for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
+  for (let threshold = max * 0.2;; threshold *= 0.5) {
+    let lines: Line[] = [];
+    for (let bin = 0; bin < numBins; ++bin) {
+      for (let angle = 0; angle < 256; ++angle) {
+        const ind = (bin << 8) + angle;
+        let val = buf[ind];
+        if (val > threshold) lines.push({ b: bin, a: angle, s: val });
+      }
+    }
+    lines.sort((a, b) => b.s - a.s);
+    const maxBinErr = numBins * HOUGH_MATCH_RATIO, maxAngleErr = 256 * HOUGH_MATCH_RATIO;
+    for (let i = 0; i < lines.length; ++i) {
+      const { b: l1b, a: l1a, s: l1s } = lines[i];
+      let strength = l1s, bin = l1b * strength, angle = l1a * strength;;
+      for (let j = i + 1; j < lines.length; ++j) {
+        const { b, a, s } = lines[j];
+        if (Math.abs(l1b - b) < maxBinErr && Math.abs(l1a - a) < maxAngleErr) {
+          bin += b * s, angle += a * s;
+          strength += s;
+          lines.splice(j, 1);
+          --j;
+        }
+      }
+      lines[i].s = strength;
+    }
+    for (const { b, a, s } of lines) {
+      const bin = Math.round(b), angle = a * Math.PI / 256;
+      ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const rho = (bin << 1) - diag;
+      const x = s * rho, y = c * rho;
+      ctx.moveTo(x + c * 1000, y - s * 1000);
+      ctx.lineTo(x - c * 1000, y + s * 1000);
+      ctx.stroke();
+    }
+    const intersection = (l1: Line, l2: Line): Point => {
+      const a = sin[l1.a], d = sin[l2.a];
+      const b = cos[l1.a], e = cos[l2.a];
+      const c = (l1.b << 1) - diag, f = (l2.b << 1) - diag;
+      // derived on paper
+      const y = (a * f - d * c) / (a * e - d * b);
+      const x = (c - y * b) / a;
+      return { x, y };
+    }
+    // within ellipse that inscribes rectangle with same aspect ratio, expanded a bit
+    // basically allows for minor corner clipping
+    const inBounds = (p: Point) => {
+      const x = p.x / width - 0.5, y = p.y / height - 0.5;
+      // less than or equal to 0.5 for perfect inscription
+      return x * x + y * y <= 0.55;
+    };
+    lines.sort((a, b) => b.s - a.s);
+    // Max 5000 quadrilaterals to check
+    lines = lines.slice(0, 20);
+    const scoreBetween = (a: Point, b: Point) => {
+      let score = 0.0;
+      // TODO: optimize
+      // algorithm shamelessly robbed from https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm
+      const xi = Math.round(a.x), yi = Math.round(a.y);
+      const xf = Math.round(b.x), yf = Math.round(b.y);
+      const dx = Math.abs(xf - xi), dy = -Math.abs(yf - yi);
+      const sx = xi < xf ? 1 : -1;
+      const sy = yi < yf ? 1 : -1;
+      for (let x = xi, y = yi, err = dx + dy; x != xf || y != yf;) {
+        score += gradBuf[y * width + x] || 0;
+        // score += gradBuf[y * width + x - 1] || 0;
+        // score += gradBuf[y * width + x + 1] || 0;
+        // score += gradBuf[(y - 1) * width + x] || 0;
+        // score += gradBuf[(y - 1) * width + x - 1] || 0;
+        // score += gradBuf[(y - 1) * width + x + 1] || 0;
+        // score += gradBuf[(y + 1) * width + x] || 0;
+        // score += gradBuf[(y + 1) * width + x - 1] || 0;
+        // score += gradBuf[(y + 1) * width + x + 1] || 0;
+        const e2 = err * 2;
+        if (e2 >= dy) {
+          err += dy;
+          x += sx;
+        }
+        if (e2 <= dx) {
+          err += dx;
+          y += sy;
+        }
+      }
+      // Partial dependence on length
+      return score;
+    }
+    const scoreQuad = (q: Quad) => {
+      return scoreBetween(q.a, q.b) + scoreBetween(q.b, q.c) + scoreBetween(q.c, q.d) + scoreBetween(q.d, q.a);
+    }
+    const rightErr = (l1: Line, l2: Line) => {
+      return Math.abs(Math.abs(l1.a - l2.a) - 128) + 1;
+    }
+    const scoreLines = (l1: Line, l2: Line, l3: Line, l4: Line) => {
+      const e12 = rightErr(l1, l2), e23 = rightErr(l2, l3), e34 = rightErr(l3, l4), e41 = rightErr(l4, l1);
+      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.1);
+    }
+    const rects: { q: Quad; s: number; }[] = []
+    for (let i = 0; i < lines.length; ++i) {
+      const l1 = lines[i];
+      for (let j = i + 1; j < lines.length; ++j) {
+        const l2 = lines[j];
+        const i12 = intersection(l1, l2);
+        for (let k = j + 1; k < lines.length; ++k) {
+          const l3 = lines[k];
+          const i13 = intersection(l1, l3);
+          const i23 = intersection(l2, l3);
+          if (inBounds(i12)) {
+            // assume corner is a page corner
+            // then i13 XOR i23 must also be a corner
+            if (inBounds(i13)) {
+              if (!inBounds(i23)) {
+                for (let l = k + 1; l < lines.length; ++l) {
+                  const l4 = lines[l];
+                  const i14 = intersection(l1, l4);
+                  const i24 = intersection(l2, l4);
+                  const i34 = intersection(l3, l4);
+                  if (!inBounds(i14) && inBounds(i24) && inBounds(i34)) {
+                    const q = { a: i12, b: i13, c: i34, d: i24 };
+                    rects.push({
+                      q,
+                      s: scoreQuad(q) * scoreLines(l1, l3, l4, l2)
+                    });
+                  }
+                }
+              }
+            } else if (inBounds(i23)) {
+              for (let l = k + 1; l < lines.length; ++l) {
+                const l4 = lines[l];
+                const i14 = intersection(l1, l4);
+                const i24 = intersection(l2, l4);
+                const i34 = intersection(l3, l4);
+                if (!inBounds(i24) && inBounds(i14) && inBounds(i34)) {
+                  const q = { a: i12, b: i23, c: i34, d: i14 };
+                  rects.push({
+                    q,
+                    s: scoreQuad(q) * scoreLines(l2, l3, l4, l1)
+                  });
+                }
+              }
+            }
+          } else {
+            // l1, l2 might be parallel
+            // l3 must be perpendicular
+            if (inBounds(i13) && inBounds(i23)) {
+              for (let l = k + 1; l < lines.length; ++l) {
+                const l4 = lines[l];
+                const i14 = intersection(l1, l4);
+                const i24 = intersection(l2, l4);
+                const i34 = intersection(l3, l4);
+                if (!inBounds(i34) && inBounds(i14) && inBounds(i24)) {
+                  const q = { a: i13, b: i23, c: i24, d: i14 };
+                  rects.push({
+                    q,
+                    s: scoreQuad(q) * scoreLines(l3, l2, l4, l1)
+                  });
+                }
+              }
+            }
+          }
         }
       }
     }
-  }
-  console.log(performance.now())
-  let maxVal = Number.EPSILON;
-  for (let i = 0; i < buf.length; ++i) {
-    maxVal = Math.max(maxVal, buf[i]);
-  }
-  const ctx = plot(grayscaleToRGB(src), width, height);
-  for (let t = 0; t < 45; ++t) {
-    for (let p = 0; p < maxDiag; ++p) {
-      const level = buf[t * maxDiag + p];
-      if (level / maxVal > 0.5) {
-        ctx.strokeStyle = `rgba(255, 0, 0, ${level / maxVal})`;
-        let rho = (p << 1) - maxDiag;
-        const a = cos[t];
-        const b = sin[t];
-        const x1 = b * rho - 5000 * a;
-        const y1 = a * rho + 5000 * b;
-        const x2 = b * rho + 5000 * a;
-        const y2 = a * rho - 5000 * b;
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      } 
+    rects.sort((a, b) => b.s - a.s);
+    console.log(rects);
+    if (!rects.length) continue;
+    const rect = rects[0].q;
+    ctx.beginPath();
+    ctx.strokeStyle = `rgba(0, 0, 255, ${1})`;
+    ctx.lineWidth = 2;
+    ctx.moveTo(rect.a.x, rect.a.y);
+    const go = (x: number, y: number, col: string) => {
+      ctx.fillStyle = col;
+      ctx.lineTo(x, y);
+      ctx.fillRect(x - 10, y - 10, 21, 21);
+    };
+    go(rect.b.x, rect.b.y, 'green');
+    go(rect.c.x, rect.c.y, 'blue');
+    go(rect.d.x, rect.d.y, 'purple');
+    go(rect.a.x, rect.a.y, 'red');
+    ctx.stroke();
+    ctx.closePath();
+    const sorted = sortQuad(rect);
+    const newWidth = 1000, newHeight = Math.floor(newWidth * 11 / 8);
+    const projector = createProjector({
+      a: { x: 0, y: newHeight },
+      b: { x: 0, y: 0 },
+      c: { x: newWidth, y: 0 },
+      d: { x: newWidth, y: newHeight }
+    }, sorted);
+    const d2 = new Uint8ClampedArray(newWidth * newHeight * 4);
+    for (let y = 0; y < newHeight; ++y) {
+      for (let x = 0; x < newWidth; ++x) {
+        const pt = projector({ x, y });
+        const xf = Math.floor(pt.x);
+        const xt = pt.x - xf;
+        const yf = Math.floor(pt.y);
+        const yt = pt.y - yf;
+        const rawBase = (yf * width + xf) * 4;
+        for (let i = 0; i < 4; ++i) {
+          const base = rawBase + i;
+          let a = rgb[base] * (1 - xt) + rgb[base + 4] * xt;
+          let b = rgb[base + 4 * width] * (1 - xt) + rgb[base + 4 * width + 4] * xt;
+          d2[(y * newWidth + x) * 4 + i] = a * (1 - yt) + b * yt;
+        }
+      }
     }
+    const c2 = plot(d2, newWidth, newHeight);
+    break;
   }
+
   return dst;
 }
 
@@ -245,8 +621,7 @@ const getEdges = ({ data, width, height }: ImageData) => {
   // const img = grayscale(data);
   // console.log(grayscale(data), width, height);
   console.log(performance.now())
-  const edges = canny(grayscale(data), width, height);
-  houghLines(edges, width, height);
+  houghLines(data, width, height);
   // plot(grayscaleToRGB(edges), width, height);
 }
 
