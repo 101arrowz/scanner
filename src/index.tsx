@@ -1,6 +1,6 @@
 import { render } from 'react-dom';
 
-const readFile = File.prototype.arrayBuffer || function(this: File) {
+const readFile = Blob.prototype.arrayBuffer || function(this: Blob) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
     fr.onload = () => {
@@ -73,6 +73,30 @@ const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer, sr
   return dst;
 }
 
+const downscale = (src: Float32Array, width: number, height: number, by: number, dst?: Float32Array) => {
+  console.log(by);
+  const dw = Math.floor(width / by) + 1;
+  if (!dst) {
+    dst = new Float32Array((Math.floor(height / by) + 1) * dw);
+  }
+  const by2 = by * by;
+  for (let i = 0; i < height; ++i) {
+    const di = i / by;
+    const dis = Math.floor(di), die = dis + 1, did = di - dis, didr = 1 - did;
+    for (let j = 0; j < width; ++j) {
+      const dj = j / by;
+      const djs = Math.floor(dj), dje = djs + 1, djd = dj - djs, djdr = 1 - djd;
+      const val = src[i * width + j] / by2;
+      dst[dis * dw + djs] += val * didr * djdr;
+      dst[die * dw + djs] += val * did * djdr;
+      dst[dis * dw + dje] += val * didr * djd;
+      dst[die * dw + dje] += val * did * djd;
+    }
+  }
+  console.log(dst);
+  return dst;
+}
+
 const channel = (src: Uint8ClampedArray, channel: 0 | 1 | 2, dst = new Float32Array(src.buffer, src.byteOffset, src.byteLength >> 2)) => {
   for (let px = 0; px < dst.length; ++px) {
     dst[px] = src[(px << 2) + channel] / 255;
@@ -89,7 +113,6 @@ const grayscaleToRGB = (src: Float32Array, dst = new Uint8ClampedArray(src.buffe
   return dst;
 }
 
-// TODO: optimize these with manual implementations for better perf
 const sobelX = convolver(new Float32Array([
   -1.0, 0.0, 1.0,
   -2.0, 0.0, 2.0,
@@ -180,7 +203,7 @@ for (let t = 0; t < 256; ++t) {
   sin[t] = Math.sin(theta);
 }
 
-const HOUGH_MATCH_RATIO = 1 / 40;
+const HOUGH_MATCH_RATIO = 1 / 20;
 
 const houghLinesUnoptimized = (src: Float32Array, width: number, height: number, dst = new Float32Array(src.length)) => {
   const diag = Math.hypot(width, height);
@@ -222,7 +245,7 @@ const houghLinesUnoptimized = (src: Float32Array, width: number, height: number,
       let bin = l1b * l1s, angle = l1a * l1s, strength = l1s;
       for (let j = i + 1; j < lines.length; ++j) {
         const { b, a, s } = lines[j];
-        if (Math.abs(l1b - b) < numBins * HOUGH_MATCH_RATIO && Math.abs(l1a - a) < 256 * HOUGH_MATCH_RATIO) {
+        if (Math.abs(l1b - b) <= Math.ceil(numBins * HOUGH_MATCH_RATIO) && Math.abs(l1a - a) <= Math.ceil(256 * HOUGH_MATCH_RATIO)) {
           bin += b * s;
           angle += a * s;
           strength += s;
@@ -231,8 +254,8 @@ const houghLinesUnoptimized = (src: Float32Array, width: number, height: number,
         }
       }
       lines[i] = {
-        b: bin / strength,
-        a: angle / strength,
+        b: Math.round(bin / strength),
+        a: Math.round(angle / strength),
         s: strength
       };
     }
@@ -326,9 +349,7 @@ const sortQuad = ({ a, b, c, d }: Quad): Quad => {
   const top = Math.hypot(b.x - c.x, b.y - c.y) + Math.hypot(d.x - a.x, d.y - a.y);
   // ab or cd
   if (side > top) {
-    const avgABx = (a.x + b.x) / 2;
-    const avgCDx = (c.x + d.x) / 2;
-    if (avgABx < avgCDx) {
+    if (a.x + b.x < c.x + d.x) {
       return a.y > b.y
         ? { a: a, b: b, c: c, d: d }
         : { a: b, b: a, c: d, d: c };
@@ -338,9 +359,7 @@ const sortQuad = ({ a, b, c, d }: Quad): Quad => {
         : { a: d, b: c, c: b, d: a };
     }
   } else {
-    const avgBCx = (b.x + c.x) / 2;
-    const avgDAx = (a.x + d.x) / 2;
-    if (avgBCx < avgDAx) {
+    if (b.x + c.x < d.x + a.x) {
       return b.y > c.y
         ? { a: b, b: c, c: d, d: a }
         : { a: c, b: b, c: a, d: d };
@@ -352,21 +371,257 @@ const sortQuad = ({ a, b, c, d }: Quad): Quad => {
   }
 }
 
+const toPDF = async (images: ImageData[]) => {
+  const pdfChunks: (string | ArrayLike<number>)[] = [];
+  let index = 0;
+  const offsets: number[] = [];
+  const write = (chunk: string | ArrayLike<number>) => {
+    pdfChunks.push(chunk);
+    index += chunk.length;
+  }
+  const token = (chunk: string | ArrayLike<number>) => {
+    write(' ');
+    write(chunk);
+  }
+  const concat = (chunks: (string | ArrayLike<number>)[]) => {
+    let len = 0;
+    for (const chunk of chunks) len += chunk.length;
+    const buf = new Uint8Array(len);
+    len = 0;
+    for (const chunk of chunks) {
+      if (typeof chunk == 'string') {
+        for (let i = 0; i < chunk.length; ++i) buf[i + len] = chunk.charCodeAt(i);
+      } else {
+        buf.set(chunk, len);
+      }
+      len += chunk.length;
+    }
+    return buf;
+  }
+  // Convenience functions
+  const comment = (content: string) => {
+    write("%" + content + '\n');
+  }
+  const number = (value: number) => {
+    // Note: this doesnt work for very small and very large numbers
+    token(value.toString());
+  }
+  const ascii = (value: string) => {
+    token('(' + value.replace(/[\n\r\t\f\b\(\)\\]/g, c => '\\00' + c.charCodeAt(0).toString(8)) + ')');
+  }
+  const bin = (value: string | ArrayLike<number>) => {
+    let data = '<';
+    if (typeof value == 'string') {
+      for (let i = 0; i < value.length; ++i) {
+        data += value.charCodeAt(i).toString(16);
+      }
+    } else {
+      for (let i = 0; i < value.length; ++i) {
+        data += value[i].toString(16);
+      }
+    }
+    token(data + '>');
+  };
+  const name = (value: string) => {
+    // Note: only supports ASCII names
+    token('/' + value);
+  };
+  const array = (fn: () => void) => {
+    token('[');
+    fn();
+    token(']');
+  };
+  type Dict = Record<string, () => void>;
+  const dict = (values: Dict) => {
+    token('<<');
+    for (const key in values) {
+      name(key);
+      values[key]();
+    }
+    token('>>');
+  };
+  const stream = (desc: Dict, content: ArrayLike<number>) => {
+    if (!desc['Length']) throw new TypeError('need stream length');
+    dict(desc);
+    token('stream\n');
+    write(content);
+    write('endstream');
+  };
+  const object = (fn: () => void,) => {
+    write(' ');
+    write(offsets.push(index) + ' 0 obj');
+    fn();
+    token('endobj');
+    return offsets.length;
+  };
+  const reference = (id: number) => {
+    token(id + ' 0 R');
+  }
+  const nullObject = () => {
+    token('null');
+  };
 
-const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
+  // v1.4 for compatibility
+  comment('PDF-1.4');
+    // 4 byte binary comment, as suggested by spec
+  comment('\x90\x85\xfa\xe3');
+  const pages = await Promise.all(images.map(async img => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    canvas.getContext('2d')!.putImageData(img, 0, 0);
+    const jpeg = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+    const jpegData = new Uint8Array(await readFile.call(jpeg));
+    const image = object(() => {
+      stream({
+        Type() {
+          name('XObject');
+        },
+        Subtype() {
+          name('Image');
+        },
+        Width() {
+          number(img.width);
+        },
+        Height() {
+          number(img.height);
+        },
+        ColorSpace() {
+          name('DeviceRGB');
+        },
+        BitsPerComponent() {
+          number(8);
+        },
+        Filter() {
+          name('DCTDecode');
+        },
+        Length() {
+          number(jpegData.length);
+        }
+      }, jpegData);
+    });
+    // US Letter width
+    const height = 792;
+    const width = height * img.width / img.height;
+    const contents = object(() => {
+      const result = `${width} 0 0 ${height} 0 0 cm /I Do`;
+      stream({
+        Length() {
+          number(result.length);
+        }
+      }, concat([
+        result
+      ]));
+    });
+    const page = object(() => {
+      dict({
+        Type() {
+          name('Page')
+        },
+        Parent() {
+          reference(offsets.length + 1);
+        },
+        Resources() {
+          dict({
+            XObject() {
+              dict({
+                I() {
+                  reference(image);
+                }
+              });
+            }
+          });
+        },
+        Contents() {
+          reference(contents);
+        },
+        MediaBox() {
+          array(() => {
+            number(0);
+            number(0);
+            number(width);
+            number(height);
+          });
+        }
+      });
+    });
+    return page;
+  }));
+
+  const pageRoot = object(() => {
+    dict({
+      Type() {
+        name('Pages');
+      },
+      Kids() {
+        array(() => {
+          for (const page of pages) {
+            reference(page);
+          }
+        });
+      },
+      Count() {
+        number(pages.length);
+      }
+    })
+  });
+
+  const catalog = object(() => {
+    dict({
+      Type() {
+        name('Catalog');
+      },
+      Pages() {
+        reference(pageRoot);
+      }
+    });
+  });
+
+  // XREF
+  write('\n');
+  const xrefOffset = index;
+  write('xref\n0 ' + (offsets.length + 1) + '\n0000000000 65535 f \n');
+  for (const offset of offsets) {
+    write(offset.toString().padStart(10, '0') + ' 00000 n \n');
+  }
+  write('trailer');
+  dict({
+    Size() {
+      number(offsets.length + 1);
+    },
+    Root() {
+      reference(catalog);
+    }
+  });
+  write('\nstartxref\n' + xrefOffset + '\n%%EOF');
+  const out = concat(pdfChunks);
+  const url = URL.createObjectURL(new Blob([out]));
+  const el = document.createElement('a');
+  el.download = 'gen.pdf';
+  el.href = url;
+  el.click();
+  URL.revokeObjectURL(url);
+}
+
+const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
+  console.time('document');
   const diag = Math.hypot(width, height);
   const numBins = Math.floor(diag);
-  const src = grayscale(rgb, new Float32Array(rgb.length >> 2));
+  const scaleFactor = 2 ** Math.max(0, Math.floor(Math.log2(width / 500)));
+  const src = downscale(channel(rgb, 2, new Float32Array(rgb.length >> 2)), width, height, scaleFactor);
+  const srcWidth = Math.floor(width / scaleFactor) + 1;
+  const srcHeight = Math.floor(height / scaleFactor) + 1;
+  console.timeLog('document', 'grayscale');
   const scratch = new Float32Array((src.length << 1) + (numBins << 8));
-  const dst = scratch.subarray(0, src.length);
+  const dst = gaussianBlur(src, srcWidth, srcHeight, scratch.subarray(0, src.length));
   const gradBuf = scratch.subarray(src.length, src.length << 1);
-  gaussianBlur(src, width, height, dst);
+  console.timeLog('document', 'blur');
   const buf = scratch.subarray(src.length << 1);
-  const east = 1, southwest = width - 1, south = width, southeast = width + 1;
-  const iim = height - 1, jim = width - 1;
+  const east = 1, southwest = srcWidth - 1, south = srcWidth, southeast = srcWidth + 1;
+  const iim = srcHeight - 1, jim = srcWidth - 1;
   for (let i = 1; i < iim; ++i) {
     for (let j = 1; j < jim; ++j) {
-      const px = i * width + j;
+      const px = i * srcWidth + j;
       const nw = dst[px - southeast], n = dst[px - south], ne = dst[px - southwest], w = dst[px - east],
             e = dst[px + east], sw = dst[px + southwest], s = dst[px + south], se = dst[px + southeast];
       const sx = 2 * (e - w) + ne + se - nw - sw;
@@ -381,11 +636,13 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
       gradBuf[px] = grad;
     }
   }
+  console.timeLog('document', 'tally');
   type Line = { b: number; a: number; s: number; };
-  const ctx = plot(grayscaleToRGB(dst, new Uint8ClampedArray(dst.length << 2)), width, height);
+  const ctx = plot(grayscaleToRGB(dst, new Uint8ClampedArray(dst.length << 2)), srcWidth, srcHeight);
   let max = 0.0;
   for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
-  for (let threshold = max * 0.2;; threshold *= 0.5) {
+  console.timeLog('document', 'tally2');
+  for (let threshold = max * 0.1;; threshold *= 0.5) {
     let lines: Line[] = [];
     for (let bin = 0; bin < numBins; ++bin) {
       for (let angle = 0; angle < 256; ++angle) {
@@ -394,22 +651,29 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
         if (val > threshold) lines.push({ b: bin, a: angle, s: val });
       }
     }
+    console.timeLog('document', 'tally3');
     lines.sort((a, b) => b.s - a.s);
-    const maxBinErr = numBins * HOUGH_MATCH_RATIO, maxAngleErr = 256 * HOUGH_MATCH_RATIO;
+    const maxBinErr = Math.ceil(numBins * HOUGH_MATCH_RATIO), maxAngleErr = Math.ceil(256 * HOUGH_MATCH_RATIO);
     for (let i = 0; i < lines.length; ++i) {
       const { b: l1b, a: l1a, s: l1s } = lines[i];
-      let strength = l1s, bin = l1b * strength, angle = l1a * strength;;
+      let bin = l1b * l1s, angle = l1a * l1s, strength = l1s;
       for (let j = i + 1; j < lines.length; ++j) {
         const { b, a, s } = lines[j];
-        if (Math.abs(l1b - b) < maxBinErr && Math.abs(l1a - a) < maxAngleErr) {
-          bin += b * s, angle += a * s;
-          strength += s;
+        if (Math.abs(l1b - b) <= maxBinErr && Math.abs(l1a - a) <= maxAngleErr) {
           lines.splice(j, 1);
+          angle += a * s;
+          bin += b * s;
+          strength += s;
           --j;
         }
       }
-      lines[i].s = strength;
+      lines[i] = {
+        b: l1b,
+        a: l1a,
+        s: strength
+      };
     }
+    console.timeLog('document', 'hough');
     for (const { b, a, s } of lines) {
       const bin = Math.round(b), angle = a * Math.PI / 256;
       ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
@@ -417,8 +681,8 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
       const s = Math.sin(angle);
       const rho = (bin << 1) - diag;
       const x = s * rho, y = c * rho;
-      ctx.moveTo(x + c * 1000, y - s * 1000);
-      ctx.lineTo(x - c * 1000, y + s * 1000);
+      ctx.moveTo(x + c * 10000, y - s * 10000);
+      ctx.lineTo(x - c * 10000, y + s * 10000);
       ctx.stroke();
     }
     const intersection = (l1: Line, l2: Line): Point => {
@@ -433,11 +697,12 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
     // within ellipse that inscribes rectangle with same aspect ratio, expanded a bit
     // basically allows for minor corner clipping
     const inBounds = (p: Point) => {
-      const x = p.x / width - 0.5, y = p.y / height - 0.5;
+      const x = p.x / srcWidth - 0.5, y = p.y / srcHeight - 0.5;
       // less than or equal to 0.5 for perfect inscription
       return x * x + y * y <= 0.55;
     };
     lines.sort((a, b) => b.s - a.s);
+    console.log(lines);
     // Max 5000 quadrilaterals to check
     lines = lines.slice(0, 20);
     const scoreBetween = (a: Point, b: Point) => {
@@ -450,15 +715,8 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
       const sx = xi < xf ? 1 : -1;
       const sy = yi < yf ? 1 : -1;
       for (let x = xi, y = yi, err = dx + dy; x != xf || y != yf;) {
-        score += gradBuf[y * width + x] || 0;
-        // score += gradBuf[y * width + x - 1] || 0;
-        // score += gradBuf[y * width + x + 1] || 0;
-        // score += gradBuf[(y - 1) * width + x] || 0;
-        // score += gradBuf[(y - 1) * width + x - 1] || 0;
-        // score += gradBuf[(y - 1) * width + x + 1] || 0;
-        // score += gradBuf[(y + 1) * width + x] || 0;
-        // score += gradBuf[(y + 1) * width + x - 1] || 0;
-        // score += gradBuf[(y + 1) * width + x + 1] || 0;
+        const px = y * srcWidth + x;
+        score += gradBuf[px] || 0;
         const e2 = err * 2;
         if (e2 >= dy) {
           err += dy;
@@ -469,14 +727,15 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
           y += sy;
         }
       }
-      // Partial dependence on length
-      return score;
+      // No dependence on length
+      return score / Math.hypot(a.x - b.x, a.y - b.y);
     }
     const scoreQuad = (q: Quad) => {
       return scoreBetween(q.a, q.b) + scoreBetween(q.b, q.c) + scoreBetween(q.c, q.d) + scoreBetween(q.d, q.a);
     }
     const rightErr = (l1: Line, l2: Line) => {
-      return Math.abs(Math.abs(l1.a - l2.a) - 128) + 1;
+      const err = Math.abs(l1.a - l2.a) - 128;
+      return err * err + 1;
     }
     const scoreLines = (l1: Line, l2: Line, l3: Line, l4: Line) => {
       const e12 = rightErr(l1, l2), e23 = rightErr(l2, l3), e34 = rightErr(l3, l4), e41 = rightErr(l4, l1);
@@ -548,6 +807,7 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
         }
       }
     }
+    console.timeLog('document', 'rects');
     rects.sort((a, b) => b.s - a.s);
     console.log(rects);
     if (!rects.length) continue;
@@ -568,7 +828,22 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
     ctx.stroke();
     ctx.closePath();
     const sorted = sortQuad(rect);
-    const newWidth = 1000, newHeight = Math.floor(newWidth * 11 / 8);
+    sorted.a.x *= scaleFactor;
+    sorted.b.x *= scaleFactor;
+    sorted.c.x *= scaleFactor;
+    sorted.d.x *= scaleFactor;
+    sorted.a.y *= scaleFactor;
+    sorted.b.y *= scaleFactor;
+    sorted.c.y *= scaleFactor;
+    sorted.d.y *= scaleFactor;
+    const newHeight = Math.floor(Math.max(
+      Math.hypot(sorted.a.x - sorted.b.x, sorted.a.y - sorted.b.y) +
+      Math.hypot(sorted.c.x - sorted.d.x, sorted.c.y - sorted.d.y)
+    ) / 2);
+    const newWidth = Math.floor((
+      Math.hypot(sorted.a.x - sorted.d.x, sorted.a.y - sorted.d.y) +
+      Math.hypot(sorted.b.x - sorted.c.x, sorted.b.y - sorted.c.y)
+    ) / 2);
     const projector = createProjector({
       a: { x: 0, y: newHeight },
       b: { x: 0, y: 0 },
@@ -592,7 +867,9 @@ const houghLines = (rgb: Uint8ClampedArray, width: number, height: number) => {
         }
       }
     }
-    const c2 = plot(d2, newWidth, newHeight);
+    console.timeLog('document', 'translate');
+    await toPDF([new ImageData(d2, newWidth, newHeight)]);
+    console.timeLog('document', 'pdf');
     break;
   }
 
@@ -616,18 +893,9 @@ const plot = (src: Uint8ClampedArray, width: number, height: number) => {
   return ctx;
 }
 
-const getEdges = ({ data, width, height }: ImageData) => {
-  // Reuse buffer for performance
-  // const img = grayscale(data);
-  // console.log(grayscale(data), width, height);
-  console.log(performance.now())
-  houghLines(data, width, height);
-  // plot(grayscaleToRGB(edges), width, height);
-}
-
 const App = () => {
   return <input type="file" accept="image/*" onChange={async ({ currentTarget: { files } }) => {
-    console.log(files, getEdges(await getImage(files![0])));
+    console.log(files, await detectDocument(await getImage(files![0])));
   }}></input>
 }
 
