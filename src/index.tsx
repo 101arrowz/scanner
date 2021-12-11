@@ -75,16 +75,16 @@ const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer, sr
 
 const downscale = (src: Float32Array, width: number, height: number, by: number, dst?: Float32Array) => {
   console.log(by);
-  const dw = Math.floor(width / by) + 1;
+  const dw = Math.floor((width + 0.5) / by) + 1;
   if (!dst) {
-    dst = new Float32Array((Math.floor(height / by) + 1) * dw);
+    dst = new Float32Array((Math.floor((height + 0.5) / by) + 1) * dw);
   }
   const by2 = by * by;
   for (let i = 0; i < height; ++i) {
-    const di = i / by;
+    const di = (i + 0.5) / by;
     const dis = Math.floor(di), die = dis + 1, did = di - dis, didr = 1 - did;
     for (let j = 0; j < width; ++j) {
-      const dj = j / by;
+      const dj = (j + 0.5) / by;
       const djs = Math.floor(dj), dje = djs + 1, djd = dj - djs, djdr = 1 - djd;
       const val = src[i * width + j] / by2;
       dst[dis * dw + djs] += val * didr * djdr;
@@ -231,7 +231,7 @@ const houghLinesUnoptimized = (src: Float32Array, width: number, height: number,
   let max = 0.0;
   for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
   type Line = { b: number; a: number; s: number; }
-  for (let threshold = max * 0.2;; threshold *= 0.5) {
+  for (let threshold = max * 0.2;; threshold *= 0.8) {
     const lines: Line[] = [];
     for (let bin = 0; bin < numBins; ++bin) {
       for (let angle = 0; angle < 256; ++angle) {
@@ -342,6 +342,13 @@ const createProjector = (from: Quad, to: Quad) => {
       y: projected[1] / projected[2]
     };
   };
+}
+
+console.timeLog = (label, ...data) => {
+  const res = label + ' ' + performance.now() + data.join(' ');
+  const el = document.createElement('div');
+  el.textContent = res;
+  document.body.appendChild(el);
 }
 
 const sortQuad = ({ a, b, c, d }: Quad): Quad => {
@@ -609,8 +616,8 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
   const numBins = Math.floor(diag);
   const scaleFactor = 2 ** Math.max(0, Math.floor(Math.log2(width / 500)));
   const src = downscale(channel(rgb, 2, new Float32Array(rgb.length >> 2)), width, height, scaleFactor);
-  const srcWidth = Math.floor(width / scaleFactor) + 1;
-  const srcHeight = Math.floor(height / scaleFactor) + 1;
+  const srcWidth = Math.floor((width + 0.5) / scaleFactor) + 1;
+  const srcHeight = Math.floor((height + 0.5) / scaleFactor) + 1;
   console.timeLog('document', 'grayscale');
   const scratch = new Float32Array((src.length << 1) + (numBins << 8));
   const dst = gaussianBlur(src, srcWidth, srcHeight, scratch.subarray(0, src.length));
@@ -836,14 +843,15 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
     sorted.b.y *= scaleFactor;
     sorted.c.y *= scaleFactor;
     sorted.d.y *= scaleFactor;
-    const newHeight = Math.floor(Math.max(
+    const trueHeight = Math.floor(Math.max(
       Math.hypot(sorted.a.x - sorted.b.x, sorted.a.y - sorted.b.y) +
       Math.hypot(sorted.c.x - sorted.d.x, sorted.c.y - sorted.d.y)
     ) / 2);
-    const newWidth = Math.floor((
+    const trueWidth = Math.floor((
       Math.hypot(sorted.a.x - sorted.d.x, sorted.a.y - sorted.d.y) +
       Math.hypot(sorted.b.x - sorted.c.x, sorted.b.y - sorted.c.y)
     ) / 2);
+    const newHeight = Math.min(trueHeight, 1584), newWidth = Math.floor(trueWidth / trueHeight * newHeight);
     const projector = createProjector({
       a: { x: 0, y: newHeight },
       b: { x: 0, y: 0 },
@@ -855,15 +863,19 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
       for (let x = 0; x < newWidth; ++x) {
         const pt = projector({ x, y });
         const xf = Math.floor(pt.x);
-        const xt = pt.x - xf;
         const yf = Math.floor(pt.y);
-        const yt = pt.y - yf;
-        const rawBase = (yf * width + xf) * 4;
-        for (let i = 0; i < 4; ++i) {
-          const base = rawBase + i;
-          let a = rgb[base] * (1 - xt) + rgb[base + 4] * xt;
-          let b = rgb[base + 4 * width] * (1 - xt) + rgb[base + 4 * width + 4] * xt;
-          d2[(y * newWidth + x) * 4 + i] = a * (1 - yt) + b * yt;
+        const dBase = (y * newWidth + x) * 4;
+        d2[dBase + 3] = 255;
+        if (xf >= -1 && xf < width && yf >= -1 && yf < height) {
+          const xt = pt.x - xf;
+          const yt = pt.y - yf;
+          const rawBase = (yf * width + xf) * 4;
+          for (let i = 0; i < 3; ++i) {
+            const base = rawBase + i;
+            let a = rgb[base] * (1 - xt) + rgb[base + 4] * xt;
+            let b = rgb[base + 4 * width] * (1 - xt) + rgb[base + 4 * width + 4] * xt;
+            d2[dBase + i] = a * (1 - yt) + b * yt;
+          }
         }
       }
     }
