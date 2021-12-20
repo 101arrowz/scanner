@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react';
+import { css } from '@emotion/react';
 import { render } from 'react-dom';
 
 const readFile = Blob.prototype.arrayBuffer || function(this: Blob) {
@@ -28,6 +30,15 @@ const getImage = async (img: File) => {
   canvas.width = elem.width, canvas.height = elem.height;
   ctx.drawImage(elem, 0, 0);
   return ctx.getImageData(0, 0, elem.width, elem.height);
+}
+
+const download = (file: Blob, name: string) => {
+  const url = URL.createObjectURL(file);
+  const el = document.createElement('a');
+  el.download = name;
+  el.href = url;
+  el.click();
+  URL.revokeObjectURL(url);
 }
 
 const clamp = (x: number, min: number, max: number) =>
@@ -74,26 +85,39 @@ const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer, sr
 }
 
 const downscale = (src: Float32Array, width: number, height: number, by: number, dst?: Float32Array) => {
-  console.log(by);
-  const dw = Math.floor((width + 0.5) / by) + 1;
+  const dw = Math.floor(width / by);
+  const dh = Math.floor(height / by)
   if (!dst) {
-    dst = new Float32Array((Math.floor((height + 0.5) / by) + 1) * dw);
+    dst = new Float32Array(dh * dw);
   }
   const by2 = by * by;
-  for (let i = 0; i < height; ++i) {
-    const di = (i + 0.5) / by;
-    const dis = Math.floor(di), die = dis + 1, did = di - dis, didr = 1 - did;
-    for (let j = 0; j < width; ++j) {
-      const dj = (j + 0.5) / by;
-      const djs = Math.floor(dj), dje = djs + 1, djd = dj - djs, djdr = 1 - djd;
-      const val = src[i * width + j] / by2;
-      dst[dis * dw + djs] += val * didr * djdr;
-      dst[die * dw + djs] += val * did * djdr;
-      dst[dis * dw + dje] += val * didr * djd;
-      dst[die * dw + dje] += val * did * djd;
+  for (let i = 0; i < dh; ++i) {
+    const si = i * by, sie = si + by, sif = Math.floor(si), sic = sif + 1, sief = Math.floor(sie);
+    const sir = sic - si, sire = sie - sief;
+    for (let j = 0; j < dw; ++j) {
+      const sj = j * by, sje = sj + by, sjf = Math.floor(sj), sjc = sjf + 1, sjef = Math.floor(sje);
+      const sjr = sjc - sj, sjre = sje - sjef;
+      let sum = 0;
+      for (let rsi = sic; rsi < sief; ++rsi) {
+        for (let rsj = sjc; rsj < sjef; ++rsj) {
+          sum += src[rsi * width + rsj];
+        }
+      }
+      for (let rsj = sjc; rsj < sjef; ++rsj)  {
+        sum += src[sif * width + rsj] * sir;
+        sum += src[sief * width + rsj] * sire;
+      }
+      for (let rsi = sic; rsi < sief; ++rsi)  {
+        sum += src[rsi * width + sjf] * sjr;
+        sum += src[rsi * width + sjef] * sjre;
+      }
+      sum += src[sif * width + sjf] * sir * sjr;
+      sum += src[sif * width + sjef] * sir * sjre;
+      sum += src[sief * width + sjf] * sire * sjr;
+      sum += src[sief * width + sjef] * sire * sjre;
+      dst[i * dw + j] = sum / by2;
     }
   }
-  console.log(dst);
   return dst;
 }
 
@@ -113,87 +137,16 @@ const grayscaleToRGB = (src: Float32Array, dst = new Uint8ClampedArray(src.buffe
   return dst;
 }
 
-const sobelX = convolver(new Float32Array([
-  -1.0, 0.0, 1.0,
-  -2.0, 0.0, 2.0,
-  -1.0, 0.0, 1.0
-]), 1);
-
-const sobelY = convolver(new Float32Array([
-  1.0, 2.0, 1.0,
-  0.0, 0.0, 0.0,
-  -1.0, -2.0, -1.0
-]), 1);
-
-const gaussianBlur = convolver(new Float32Array([
+const gaussianKernel = new Float32Array([
   0.01258, 0.02516, 0.03145, 0.02516, 0.01258,
   0.02516, 0.0566, 0.07547, 0.0566, 0.02516,
   0.03145, 0.07547, 0.09434, 0.07547, 0.03145,
   0.02516, 0.0566, 0.07547, 0.0566, 0.02516,
   0.01258, 0.02516, 0.03145, 0.02516, 0.01258
-]), 2);
+]);
 
-const harris = (src: Float32Array, width: number, height: number, dst = src, scratch = new Float32Array(src.length * 5)) => {
-  const sobelXResult = sobelX(dst, width, height, scratch.subarray(0, src.length));
-  const sobelYResult = sobelY(dst, width, height, scratch.subarray(src.length, src.length * 2));
-  const gradX2 = scratch.subarray(src.length * 2, src.length * 3);
-  const gradY2 = scratch.subarray(src.length * 3, src.length * 4);
-  const gradXY = scratch.subarray(src.length * 4, src.length * 5);
-  const iim = height - 9, jim = width - 9;
-  for (let i = 0; i < height; ++i) {
-    for (let j = 0; j < width; ++j) {
-      let gx2 = 0.0, gy2 = 0.0, gxy = 0.0;
-      const ii = clamp(i - 4, 0, iim), ji = clamp(j - 4, 0, jim);
-      for (let mi = 0; mi < 9; ++mi) {
-        for (let mj = 0; mj < 9; ++mj) {
-          const px = (mi + ii) * width + (mj + ji);
-          const sx = sobelXResult[px];
-          const sy = sobelYResult[px];
-          gx2 += sx * sx;
-          gy2 += sy * sy;
-          gxy += sx * sy;
-        }
-      }
-      const px = i * width + j;
-      gradX2[px] = gx2;
-      gradY2[px] = gy2;
-      gradXY[px] = gxy;
-    }
-  }
-  for (let px = 0; px < dst.length; ++px) {
-    const gx2 = gradX2[px], gy2 = gradY2[px], gxy = gradXY[px];
-    const det = gx2 * gy2 - (gxy * gxy);
-    const trace = gx2 + gy2;
-    dst[px] = det - (0.04 * trace * trace);
-  }
-  return dst;
-}
-
-const canny = (src: Float32Array, width: number, height: number, dst = src, scratch = new Float32Array(src.length * 3)) => {
-  gaussianBlur(src, width, height, dst);
-  const sobelXResult = sobelX(dst, width, height, scratch.subarray(0, dst.length));
-  const sobelYResult = sobelY(dst, width, height, scratch.subarray(dst.length, dst.length * 2));
-  const east = 1, southwest = width - 1, south = width, southeast = width + 1;
-  for (let i = 0; i < height; ++i) {
-    for (let j = 0; j < width; ++j) {
-      const px = i * width + j;
-      const sx = sobelXResult[px], sy = sobelYResult[px];
-      const dir = sy / sx;
-      let offset = east;
-      if (dir < -2.4142 || dir > 2.4142) offset = south;
-      else if (dir < -0.4142) offset = southeast;
-      else if (dir > 0.4142) offset = southwest;
-      const grad = Math.hypot(sx, sy);
-      const nextPX = px + offset, lastPX = px - offset;
-      dst[px] =
-        (nextPX < dst.length && grad < Math.hypot(sobelXResult[nextPX], sobelYResult[nextPX])) ||
-        (lastPX >= 0 && grad < Math.hypot(sobelXResult[lastPX], sobelYResult[lastPX]))
-        ? 0
-        : grad;
-    }
-  }
-  return dst;
-}
+const gaussianBlur = (src: Float32Array, width: number, height: number, dst?: Float32Array) =>
+  convolve(src, width, height, gaussianKernel, 2, dst);
 
 const cos = new Float32Array(256);
 const sin = new Float32Array(256);
@@ -203,77 +156,7 @@ for (let t = 0; t < 256; ++t) {
   sin[t] = Math.sin(theta);
 }
 
-const HOUGH_MATCH_RATIO = 1 / 20;
-
-const houghLinesUnoptimized = (src: Float32Array, width: number, height: number, dst = new Float32Array(src.length)) => {
-  const diag = Math.hypot(width, height);
-  const numBins = Math.floor(diag);
-  gaussianBlur(src, width, height, dst);
-  const scratch = new Float32Array((dst.length << 1) + (numBins << 8));
-  const sobelXResult = sobelX(dst, width, height, scratch.subarray(0, dst.length));
-  const sobelYResult = sobelY(dst, width, height, scratch.subarray(dst.length, dst.length << 1));
-  const buf = scratch.subarray((dst.length << 1));
-  for (let i = 0; i < height; ++i) {
-    for (let j = 0; j < width; ++j) {
-      const px = i * width + j;
-      const sx = sobelXResult[px], sy = sobelYResult[px];
-      const dir = sy / sx;
-      const grad = Math.hypot(sx, sy);
-      // Add 128 to fix range. Note that this requires rotating the coordinate system
-      let angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
-      // Two shifts because otherwise indexing is messed up by in-between values
-      const bin = (cos[angle] * i + sin[angle] * j + diag) >> 1;
-      buf[(bin << 8) + angle] += grad;
-      dst[px] = grad;
-    }
-  }
-  const ctx = plot(grayscaleToRGB(dst), width, height);
-  let max = 0.0;
-  for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
-  type Line = { b: number; a: number; s: number; }
-  for (let threshold = max * 0.2;; threshold *= 0.8) {
-    const lines: Line[] = [];
-    for (let bin = 0; bin < numBins; ++bin) {
-      for (let angle = 0; angle < 256; ++angle) {
-        const ind = (bin << 8) + angle;
-        let val = buf[ind];
-        if (val > threshold) lines.push({ b: bin, a: angle, s: val });
-      }
-    }
-    for (let i = 0; i < lines.length; ++i) {
-      const { b: l1b, a: l1a, s: l1s } = lines[i];
-      let bin = l1b * l1s, angle = l1a * l1s, strength = l1s;
-      for (let j = i + 1; j < lines.length; ++j) {
-        const { b, a, s } = lines[j];
-        if (Math.abs(l1b - b) <= Math.ceil(numBins * HOUGH_MATCH_RATIO) && Math.abs(l1a - a) <= Math.ceil(256 * HOUGH_MATCH_RATIO)) {
-          bin += b * s;
-          angle += a * s;
-          strength += s;
-          lines.splice(j, 1);
-          --j;
-        }
-      }
-      lines[i] = {
-        b: Math.round(bin / strength),
-        a: Math.round(angle / strength),
-        s: strength
-      };
-    }
-    for (const { b, a, s } of lines) {
-      const bin = Math.round(b), angle = a * Math.PI / 256;
-      ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
-      const rho = (bin << 1) - diag;
-      const x = s * rho, y = c * rho;
-      ctx.moveTo(x + c * 1000, y - s * 1000);
-      ctx.lineTo(x - c * 1000, y + s * 1000);
-      ctx.stroke();
-    }
-    if (lines.length > 4) break;
-  }
-  return dst;
-}
+const HOUGH_MATCH_RATIO = 1 / 40;
 
 // logic stolen from https://math.stackexchange.com/a/339033
 
@@ -344,11 +227,15 @@ const createProjector = (from: Quad, to: Quad) => {
   };
 }
 
-console.timeLog = (label, ...data) => {
-  const res = label + ' ' + performance.now() + data.join(' ');
-  const el = document.createElement('div');
-  el.textContent = res;
-  document.body.appendChild(el);
+if (process.env.NODE_ENV !== 'production' && /(iPad)|(iPhone)|(iPod)|(android)|(webOS)/i.test(navigator.userAgent)) {
+  console.log = (...data) => {
+    const el = document.createElement('div');
+    el.textContent = data.map(v => typeof v == 'object' ? JSON.stringify(v) : v).join(' ');
+    document.body.appendChild(el);
+  }
+  console.timeLog = (label, ...data) => {
+    console.log(label + ' ' + performance.now() + ' ' + data.join(' '));
+  }
 }
 
 const sortQuad = ({ a, b, c, d }: Quad): Quad => {
@@ -601,61 +488,71 @@ const toPDF = async (images: ImageData[]) => {
     }
   });
   write('\nstartxref\n' + xrefOffset + '\n%%EOF');
-  const out = concat(pdfChunks);
-  const url = URL.createObjectURL(new Blob([out]));
-  const el = document.createElement('a');
-  el.download = 'gen.pdf';
-  el.href = url;
-  el.click();
-  URL.revokeObjectURL(url);
+  return concat(pdfChunks);
 }
 
-const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
+const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
   console.time('document');
   const diag = Math.hypot(width, height);
   const numBins = Math.floor(diag);
-  const scaleFactor = 2 ** Math.max(0, Math.floor(Math.log2(width / 500)));
-  const src = downscale(channel(rgb, 2, new Float32Array(rgb.length >> 2)), width, height, scaleFactor);
-  const srcWidth = Math.floor((width + 0.5) / scaleFactor) + 1;
-  const srcHeight = Math.floor((height + 0.5) / scaleFactor) + 1;
+  let scaleFactor = width / 360;
+  if (scaleFactor < 2) {
+    scaleFactor = 1;
+  } else if (scaleFactor > 5) {
+    scaleFactor = 5;
+  }
+  const srcWidth = Math.floor(width / scaleFactor);
+  const srcHeight = Math.floor(height / scaleFactor);
+  const srcLen = srcWidth * srcHeight;
+  const scratch = new Float32Array(srcLen * 3 + (numBins << 8));
+  const dst = scratch.subarray(0, srcLen);
+  const gradBuf = scratch.subarray(srcLen, srcLen << 1);
+  const src = scratch.subarray(srcLen << 1, srcLen * 3);
+  const buf = scratch.subarray(srcLen * 3);
+  if (scaleFactor == 1) {
+    grayscale(data, src)
+  } else {
+    downscale(grayscale(data, new Float32Array(width * height)), width, height, scaleFactor, src);
+  }
   console.timeLog('document', 'grayscale');
-  const scratch = new Float32Array((src.length << 1) + (numBins << 8));
-  const dst = gaussianBlur(src, srcWidth, srcHeight, scratch.subarray(0, src.length));
-  const gradBuf = scratch.subarray(src.length, src.length << 1);
+  gaussianBlur(src, srcWidth, srcHeight, dst);
   console.timeLog('document', 'blur');
-  const buf = scratch.subarray(src.length << 1);
   const east = 1, southwest = srcWidth - 1, south = srcWidth, southeast = srcWidth + 1;
   const iim = srcHeight - 1, jim = srcWidth - 1;
+  let totalGrad = 0.0;
   for (let i = 1; i < iim; ++i) {
     for (let j = 1; j < jim; ++j) {
       const px = i * srcWidth + j;
       const nw = dst[px - southeast], n = dst[px - south], ne = dst[px - southwest], w = dst[px - east],
             e = dst[px + east], sw = dst[px + southwest], s = dst[px + south], se = dst[px + southeast];
-      const sx = 2 * (e - w) + ne + se - nw - sw;
-      const sy = 2 * (n - s) + ne + nw - se - sw;
+      const sx = 10 * (e - w) + 3 * (ne + se - nw - sw);
+      const sy = 10 * (n - s) + 3 * (ne + nw - se - sw);
       const dir = sy / sx;
       const grad = Math.hypot(sx, sy);
       // Add 128 to fix range. Note that this requires rotating the coordinate system
-      let angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
+      const angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
       // Two shifts because otherwise indexing is messed up by in-between values
       const bin = (cos[angle] * i + sin[angle] * j + diag) >> 1;
       buf[(bin << 8) + angle] += grad;
       gradBuf[px] = grad;
+      totalGrad += grad;
     }
   }
+  const avgGrad = totalGrad / ((srcHeight - 2) * (srcWidth - 2));
   console.timeLog('document', 'tally');
   type Line = { b: number; a: number; s: number; };
-  const ctx = plot(grayscaleToRGB(dst, new Uint8ClampedArray(dst.length << 2)), srcWidth, srcHeight);
   let max = 0.0;
   for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
   console.timeLog('document', 'tally2');
-  for (let threshold = max * 0.1;; threshold *= 0.5) {
+  for (let threshold = max * 0.1, numTries = maxTries; numTries > 0; --numTries, threshold *= 0.5) {
     let lines: Line[] = [];
     for (let bin = 0; bin < numBins; ++bin) {
       for (let angle = 0; angle < 256; ++angle) {
         const ind = (bin << 8) + angle;
         let val = buf[ind];
-        if (val > threshold) lines.push({ b: bin, a: angle, s: val });
+        if (val > threshold) {
+          lines.push({ b: bin, a: angle, s: val });
+        }
       }
     }
     console.timeLog('document', 'tally3');
@@ -663,35 +560,18 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
     const maxBinErr = Math.ceil(numBins * HOUGH_MATCH_RATIO), maxAngleErr = Math.ceil(256 * HOUGH_MATCH_RATIO);
     for (let i = 0; i < lines.length; ++i) {
       const { b: l1b, a: l1a, s: l1s } = lines[i];
-      let bin = l1b * l1s, angle = l1a * l1s, strength = l1s;
+      let strength = l1s;
       for (let j = i + 1; j < lines.length; ++j) {
         const { b, a, s } = lines[j];
         if (Math.abs(l1b - b) <= maxBinErr && Math.abs(l1a - a) <= maxAngleErr) {
           lines.splice(j, 1);
-          angle += a * s;
-          bin += b * s;
           strength += s;
           --j;
         }
       }
-      lines[i] = {
-        b: l1b,
-        a: l1a,
-        s: strength
-      };
+      lines[i].s = strength;
     }
     console.timeLog('document', 'hough');
-    for (const { b, a, s } of lines) {
-      const bin = Math.round(b), angle = a * Math.PI / 256;
-      ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
-      const rho = (bin << 1) - diag;
-      const x = s * rho, y = c * rho;
-      ctx.moveTo(x + c * 10000, y - s * 10000);
-      ctx.lineTo(x - c * 10000, y + s * 10000);
-      ctx.stroke();
-    }
     const intersection = (l1: Line, l2: Line): Point => {
       const a = sin[l1.a], d = sin[l2.a];
       const b = cos[l1.a], e = cos[l2.a];
@@ -711,7 +591,10 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
     lines.sort((a, b) => b.s - a.s);
     console.log(lines);
     // Max 5000 quadrilaterals to check
-    lines = lines.slice(0, 20);
+    if (lines.length > 20) {
+      lines = lines.slice(0, 20);
+      numTries = 1;
+    }
     const scoreBetween = (a: Point, b: Point) => {
       let score = 0.0;
       // TODO: optimize
@@ -723,7 +606,7 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
       const sy = yi < yf ? 1 : -1;
       for (let x = xi, y = yi, err = dx + dy; x != xf || y != yf;) {
         const px = y * srcWidth + x;
-        score += gradBuf[px] || 0;
+        score += (gradBuf[px] || 0) - avgGrad - avgGrad;
         const e2 = err * 2;
         if (e2 >= dy) {
           err += dy;
@@ -734,11 +617,22 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
           y += sy;
         }
       }
-      // No dependence on length
-      return score / Math.hypot(a.x - b.x, a.y - b.y);
+      // Low dependence on length
+      return Math.max(score, 0) * Math.pow(dx * dx + dy * dy, -0.3);
     }
-    const scoreQuad = (q: Quad) => {
-      return scoreBetween(q.a, q.b) + scoreBetween(q.b, q.c) + scoreBetween(q.c, q.d) + scoreBetween(q.d, q.a);
+    const scoreQuad = ({ a, b, c, d }: Quad) => {
+      // const ab = Math.hypot(a.x - b.x, a.y - b.y);
+      // const bc = Math.hypot(b.x - c.x, b.y - c.y);
+      // const cd = Math.hypot(c.x - d.x, c.y - d.y);
+      // const ad = Math.hypot(d.x - a.x, d.y - a.y);
+      // let rat: number;
+      // if (ab + cd > bc + ad) {
+      //   rat = Math.pow(Math.abs(((ab + cd) / (bc + ad)) - 11 / 8.5) + 1, 3);
+      // } else {
+      //   rat = Math.pow(Math.abs(((bc + ad) / (ab + cd)) - 11 / 8.5) + 1, 3);
+      // }
+      // rat = 1;
+      return Math.pow(scoreBetween(a, b) * scoreBetween(b, c) * scoreBetween(c, d) * scoreBetween(d, a), 2);
     }
     const rightErr = (l1: Line, l2: Line) => {
       const err = Math.abs(l1.a - l2.a) - 128;
@@ -746,7 +640,7 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
     }
     const scoreLines = (l1: Line, l2: Line, l3: Line, l4: Line) => {
       const e12 = rightErr(l1, l2), e23 = rightErr(l2, l3), e34 = rightErr(l3, l4), e41 = rightErr(l4, l1);
-      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.1);
+      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.2) * Math.pow(l1.s * l2.s * l3.s * l4.s, 0.3);
     }
     const rects: { q: Quad; s: number; }[] = []
     for (let i = 0; i < lines.length; ++i) {
@@ -819,21 +713,35 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
     console.log(rects);
     if (!rects.length) continue;
     const rect = rects[0].q;
-    ctx.beginPath();
-    ctx.strokeStyle = `rgba(0, 0, 255, ${1})`;
-    ctx.lineWidth = 2;
-    ctx.moveTo(rect.a.x, rect.a.y);
-    const go = (x: number, y: number, col: string) => {
-      ctx.fillStyle = col;
-      ctx.lineTo(x, y);
-      ctx.fillRect(x - 10, y - 10, 21, 21);
-    };
-    go(rect.b.x, rect.b.y, 'green');
-    go(rect.c.x, rect.c.y, 'blue');
-    go(rect.d.x, rect.d.y, 'purple');
-    go(rect.a.x, rect.a.y, 'red');
-    ctx.stroke();
-    ctx.closePath();
+    if (process.env.NODE_ENV !== 'production') {
+      const ctx = plot(grayscaleToRGB(src, new Uint8ClampedArray(dst.length << 2)), srcWidth, srcHeight);
+      for (const { b, a, s } of lines) {
+        const bin = Math.round(b), angle = a * Math.PI / 256;
+        ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        const rho = ((bin << 1) - diag);
+        const x = s * rho, y = c * rho;
+        ctx.moveTo(x + c * 10000, y - s * 10000);
+        ctx.lineTo(x - c * 10000, y + s * 10000);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(0, 0, 255, ${1})`;
+      ctx.lineWidth = 2;
+      ctx.moveTo(rect.a.x, rect.a.y);
+      const go = (x: number, y: number, col: string) => {
+        ctx.fillStyle = col;
+        ctx.lineTo(x, y);
+        ctx.fillRect(x - 10, y - 10, 21, 21);
+      };
+      go(rect.b.x, rect.b.y, 'green');
+      go(rect.c.x, rect.c.y, 'blue');
+      go(rect.d.x, rect.d.y, 'purple');
+      go(rect.a.x, rect.a.y, 'red');
+      ctx.stroke();
+      ctx.closePath();
+    }
     const sorted = sortQuad(rect);
     sorted.a.x *= scaleFactor;
     sorted.b.x *= scaleFactor;
@@ -843,49 +751,50 @@ const detectDocument = async ({ data: rgb, width, height }: ImageData) => {
     sorted.b.y *= scaleFactor;
     sorted.c.y *= scaleFactor;
     sorted.d.y *= scaleFactor;
-    const trueHeight = Math.floor(Math.max(
-      Math.hypot(sorted.a.x - sorted.b.x, sorted.a.y - sorted.b.y) +
-      Math.hypot(sorted.c.x - sorted.d.x, sorted.c.y - sorted.d.y)
-    ) / 2);
-    const trueWidth = Math.floor((
-      Math.hypot(sorted.a.x - sorted.d.x, sorted.a.y - sorted.d.y) +
-      Math.hypot(sorted.b.x - sorted.c.x, sorted.b.y - sorted.c.y)
-    ) / 2);
-    const newHeight = Math.min(trueHeight, 1584), newWidth = Math.floor(trueWidth / trueHeight * newHeight);
-    const projector = createProjector({
-      a: { x: 0, y: newHeight },
-      b: { x: 0, y: 0 },
-      c: { x: newWidth, y: 0 },
-      d: { x: newWidth, y: newHeight }
-    }, sorted);
-    const d2 = new Uint8ClampedArray(newWidth * newHeight * 4);
-    for (let y = 0; y < newHeight; ++y) {
-      for (let x = 0; x < newWidth; ++x) {
-        const pt = projector({ x, y });
-        const xf = Math.floor(pt.x);
-        const yf = Math.floor(pt.y);
-        const dBase = (y * newWidth + x) * 4;
-        d2[dBase + 3] = 255;
-        if (xf >= -1 && xf < width && yf >= -1 && yf < height) {
-          const xt = pt.x - xf;
-          const yt = pt.y - yf;
-          const rawBase = (yf * width + xf) * 4;
-          for (let i = 0; i < 3; ++i) {
-            const base = rawBase + i;
-            let a = rgb[base] * (1 - xt) + rgb[base + 4] * xt;
-            let b = rgb[base + 4 * width] * (1 - xt) + rgb[base + 4 * width + 4] * xt;
-            d2[dBase + i] = a * (1 - yt) + b * yt;
-          }
+    console.timeEnd('document');
+    return sorted;
+  }
+}
+
+const perspective = ({ data, width, height }: ImageData, rect: Quad) => {
+  const trueHeight = Math.floor(Math.max(
+    Math.hypot(rect.a.x - rect.b.x, rect.a.y - rect.b.y) +
+    Math.hypot(rect.c.x - rect.d.x, rect.c.y - rect.d.y)
+  ) / 2);
+  const trueWidth = Math.floor((
+    Math.hypot(rect.a.x - rect.d.x, rect.a.y - rect.d.y) +
+    Math.hypot(rect.b.x - rect.c.x, rect.b.y - rect.c.y)
+  ) / 2);
+  const newHeight = Math.min(trueHeight, 1584);
+  const newWidth = Math.floor(8.5 / 11 * newHeight) // Math.floor(trueWidth / trueHeight * newHeight);
+  const projector = createProjector({
+    a: { x: 0, y: newHeight },
+    b: { x: 0, y: 0 },
+    c: { x: newWidth, y: 0 },
+    d: { x: newWidth, y: newHeight }
+  }, rect);
+  const out = new Uint8ClampedArray(newWidth * newHeight * 4);
+  for (let y = 0; y < newHeight; ++y) {
+    for (let x = 0; x < newWidth; ++x) {
+      const pt = projector({ x, y });
+      const xf = Math.floor(pt.x);
+      const yf = Math.floor(pt.y);
+      const dBase = (y * newWidth + x) * 4;
+      out[dBase + 3] = 255;
+      if (xf >= -1 && xf < width && yf >= -1 && yf < height) {
+        const xt = pt.x - xf;
+        const yt = pt.y - yf;
+        const rawBase = (yf * width + xf) * 4;
+        for (let i = 0; i < 3; ++i) {
+          const base = rawBase + i;
+          let a = data[base] * (1 - xt) + data[base + 4] * xt;
+          let b = data[base + 4 * width] * (1 - xt) + data[base + 4 * width + 4] * xt;
+          out[dBase + i] = a * (1 - yt) + b * yt;
         }
       }
     }
-    console.timeLog('document', 'translate');
-    await toPDF([new ImageData(d2, newWidth, newHeight)]);
-    console.timeLog('document', 'pdf');
-    break;
   }
-
-  return dst;
+  return new ImageData(out, newWidth, newHeight);
 }
 
 const normalize = (src: Float32Array, dst = src) => {
@@ -897,6 +806,9 @@ const normalize = (src: Float32Array, dst = src) => {
 
 const plot = (src: Uint8ClampedArray, width: number, height: number) => {
   const into = document.createElement('canvas');
+  into.addEventListener('click', e => {
+    console.log(`x: ${e.offsetX}, y: ${e.offsetY}`)
+  })
   into.width = width;
   into.height = height;
   const ctx = into.getContext('2d')!;
@@ -905,9 +817,68 @@ const plot = (src: Uint8ClampedArray, width: number, height: number) => {
   return ctx;
 }
 
+const DocumentDetectionStream = () => {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D>();
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        // width: { ideal: 4096 },
+        // height: { ideal: 2160 },
+        facingMode: 'environment'
+      }
+    }).then(mediaStream => {
+      const { width, height } = mediaStream.getVideoTracks()[0].getSettings();
+      const vid = document.createElement('video');
+      if ('srcObject' in vid) {
+        vid.srcObject = mediaStream;
+      } else {
+        vid.src = URL.createObjectURL(mediaStream as unknown as MediaSource);
+      }
+      vid.play();
+      canvas.current!.width = width!;
+      canvas.current!.height = height!;
+      const ctx = ctxRef.current!;
+      const step = () => {
+        ctx.drawImage(vid, 0, 0);
+        const imageData = ctx.getImageData(0, 0, width!, height!);
+        const rect = detectDocument(imageData);
+        if (rect) {
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(0, 0, 255, ${1})`;
+          ctx.lineWidth = 2;
+          ctx.moveTo(rect.a.x, rect.a.y);
+          const go = (x: number, y: number, col: string) => {
+            ctx.fillStyle = col;
+            ctx.lineTo(x, y);
+            ctx.fillRect(x - 10, y - 10, 21, 21);
+          };
+          go(rect.b.x, rect.b.y, 'green');
+          go(rect.c.x, rect.c.y, 'blue');
+          go(rect.d.x, rect.d.y, 'purple');
+          go(rect.a.x, rect.a.y, 'red');
+          ctx.stroke();
+          ctx.closePath();
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }, []);
+  useEffect(() => {
+    ctxRef.current = canvas.current!.getContext('2d')!;
+  }, [canvas]);
+  return <canvas ref={canvas} width={0} height={0} />;
+}
+
 const App = () => {
+  return <DocumentDetectionStream />
   return <input type="file" accept="image/*" onChange={async ({ currentTarget: { files } }) => {
-    console.log(files, await detectDocument(await getImage(files![0])));
+    const img = await getImage(files![0]);
+    let rect = detectDocument(img);
+    if (rect) {
+      download(new Blob([await toPDF([perspective(img, rect)])]), 'out.pdf');
+    }
   }}></input>
 }
 
