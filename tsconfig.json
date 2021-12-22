@@ -3,9 +3,8 @@
     "strict": true,
     "target": "ESNext",
     "module": "ESNext" ,
-    "moduleResolution": "node",
-    "jsx": "preserve",
-    "jsxImportSource": "@emotion/react"
+    "moduleResolution": "node"
   },
-  "include": ["src/"]
+  "include": ["src/"],
+  "exclude": ["src/sw.ts"]
 }

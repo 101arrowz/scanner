@@ -1,6 +1,3 @@
-import { useEffect, useRef, useState } from 'react';
-import { render } from 'react-dom';
-
 const readFile = Blob.prototype.arrayBuffer || function(this: Blob) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -50,7 +47,7 @@ const clamp = (x: number, min: number, max: number) =>
 // Convolution function
 const convolve = (src: Float32Array, width: number, height: number, matrix: Float32Array, radius: number, dst = new Float32Array(src.length)) => {
   const matSide = (radius << 1) + 1;
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV != 'production') {
     if (src.length != width * height || matrix.length != matSide * matSide) {
       throw new Error('invalid dimensions');
     }
@@ -229,7 +226,7 @@ const createProjector = (from: Quad, to: Quad) => {
   };
 }
 
-if (process.env.NODE_ENV !== 'production' && /(iPad)|(iPhone)|(iPod)|(android)|(webOS)/i.test(navigator.userAgent)) {
+if (process.env.NODE_ENV != 'production' && /(iPad)|(iPhone)|(iPod)|(android)|(webOS)/i.test(navigator.userAgent)) {
   console.log = (...data) => {
     const el = document.createElement('div');
     el.textContent = data.map(v => typeof v == 'object' ? JSON.stringify(v) : v).join(' ');
@@ -337,7 +334,9 @@ const toPDF = async (images: ImageData[]) => {
     token('>>');
   };
   const stream = (desc: Dict, content: ArrayLike<number>) => {
-    if (!desc['Length']) throw new TypeError('need stream length');
+    if (process.env.NODE_ENV != 'production') {
+      if (!desc['Length']) throw new TypeError('need stream length');
+    }
     dict(desc);
     token('stream\n');
     write(content);
@@ -711,7 +710,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
     console.log(rects);
     if (!rects.length) continue;
     const rect = sortQuad(rects[0].q);
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV != 'production') {
       plot(grayscaleToRGB(normalize(gradBuf)), srcWidth, srcHeight);
       const ctx = plot(grayscaleToRGB(src), srcWidth, srcHeight);
       for (const { b, a, s } of lines) {
@@ -828,74 +827,24 @@ const plot = (src: Uint8ClampedArray, width: number, height: number) => {
   return ctx;
 }
 
-const DocumentDetectionStream = () => {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const ctxRef = useRef<CanvasRenderingContext2D>();
-  useEffect(() => {
-    navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1080 },
-        facingMode: 'environment'
-      }
-    }).then(mediaStream => {
-      const { width, height } = mediaStream.getVideoTracks()[0].getSettings();
-      const vid = document.createElement('video');
-      if ('srcObject' in vid) {
-        vid.srcObject = mediaStream;
-      } else {
-        vid.src = URL.createObjectURL(mediaStream as unknown as MediaSource);
-      }
-      vid.play();
-      canvas.current!.width = width!;
-      canvas.current!.height = height!;
-      const ctx = ctxRef.current!;
-      const step = () => {
-        ctx.drawImage(vid, 0, 0);
-        const imageData = ctx.getImageData(0, 0, width!, height!);
-        const rect = detectDocument(imageData);
-        if (rect) {
-          ctx.beginPath();
-          ctx.strokeStyle = `rgba(0, 0, 255, ${1})`;
-          ctx.lineWidth = 2;
-          ctx.moveTo(rect.a.x, rect.a.y);
-          const go = (x: number, y: number, col: string) => {
-            ctx.fillStyle = col;
-            ctx.lineTo(x, y);
-            ctx.fillRect(x - 10, y - 10, 21, 21);
-          };
-          go(rect.b.x, rect.b.y, 'green');
-          go(rect.c.x, rect.c.y, 'blue');
-          go(rect.d.x, rect.d.y, 'purple');
-          go(rect.a.x, rect.a.y, 'red');
-          ctx.stroke();
-          ctx.closePath();
-        }
-        requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-    });
-  }, []);
-  useEffect(() => {
-    ctxRef.current = canvas.current!.getContext('2d')!;
-  }, [canvas]);
-  return <canvas ref={canvas} width={0} height={0} />;
-}
 
-const App = () => {
-  const [pages, setPages] = useState<ImageData[]>([]);
-  //return <DocumentDetectionStream />
-  return <>
-    <input type="file" accept="image/*" capture="environment" onChange={async ({ currentTarget: { files } }) => {
-      const img = await getImage(files![0]);
-      let rect = detectDocument(img);
-      if (rect) {
-        setPages(pages.concat(perspective(img, rect)))
-      }
-    }}></input>
-    <button onClick={async () => {
-      download(new Blob([await toPDF(pages)]), 'out.pdf')
-    }}>Done</button>
-  </>
-}
+const imgInput = document.getElementById('img-input') as HTMLInputElement;
+const done = document.getElementById('done') as HTMLButtonElement;
 
-render(<App />, document.getElementById('root'));
+const pages: ImageData[] = [];
+
+imgInput.addEventListener('change', async () => {
+  const img = await getImage(imgInput.files![0]);
+  let rect = detectDocument(img);
+  if (rect) {
+    pages.push(perspective(img, rect));
+  }
+});
+
+done.addEventListener('click', async () => {
+  download(new Blob([await toPDF(pages)]), 'out.pdf');
+});
+
+if (process.env.NODE_ENV == 'production') {
+  navigator.serviceWorker.register(new URL('sw.ts', import.meta.url), { type: 'module' });
+}
