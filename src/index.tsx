@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { css } from '@emotion/react';
 import { render } from 'react-dom';
 
 const readFile = Blob.prototype.arrayBuffer || function(this: Blob) {
@@ -72,10 +71,6 @@ const convolve = (src: Float32Array, width: number, height: number, matrix: Floa
   return dst;
 }
 
-const convolver = (matrix: Float32Array, radius: number) =>
-  (src: Float32Array, width: number, height: number, dst?: Float32Array) =>
-    convolve(src, width, height, matrix, radius, dst);
-
 const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer, src.byteOffset, src.byteLength >> 2)) => {
   for (let px = 0; px < dst.length; ++px) {
     const pos = px << 2;
@@ -86,15 +81,15 @@ const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer, sr
 
 const downscale = (src: Float32Array, width: number, height: number, by: number, dst?: Float32Array) => {
   const dw = Math.floor(width / by);
-  const dh = Math.floor(height / by)
+  const dh = Math.floor(height / by);
   if (!dst) {
     dst = new Float32Array(dh * dw);
   }
-  const by2 = by * by;
-  for (let i = 0; i < dh; ++i) {
+  const by2 = by * by, mi = dh - 1, mj = dw - 1;
+  for (let i = 1; i < mi; ++i) {
     const si = i * by, sie = si + by, sif = Math.floor(si), sic = sif + 1, sief = Math.floor(sie);
     const sir = sic - si, sire = sie - sief;
-    for (let j = 0; j < dw; ++j) {
+    for (let j = 1; j < mj; ++j) {
       const sj = j * by, sje = sj + by, sjf = Math.floor(sj), sjc = sjf + 1, sjef = Math.floor(sje);
       const sjr = sjc - sj, sjre = sje - sjef;
       let sum = 0;
@@ -117,6 +112,14 @@ const downscale = (src: Float32Array, width: number, height: number, by: number,
       sum += src[sief * width + sjef] * sire * sjre;
       dst[i * dw + j] = sum / by2;
     }
+  }
+  for (let i = 1; i < mi; ++i) {
+    dst[i * dw] = dst[i * dw + 1];
+    dst[i * dw + mj] = dst[i * dw + mj - 1];
+  }
+  for (let j = 0; j < dw; ++j) {
+    dst[j] = dst[j + dw];
+    dst[mi * dw + j] = dst[(mi - 1) * dw + j];
   }
   return dst;
 }
@@ -155,8 +158,7 @@ for (let t = 0; t < 256; ++t) {
   cos[t] = Math.cos(theta);
   sin[t] = Math.sin(theta);
 }
-
-const HOUGH_MATCH_RATIO = 1 / 40;
+sin[0] = cos[128];
 
 // logic stolen from https://math.stackexchange.com/a/339033
 
@@ -341,7 +343,7 @@ const toPDF = async (images: ImageData[]) => {
     write(content);
     write('endstream');
   };
-  const object = (fn: () => void,) => {
+  const object = (fn: () => void) => {
     write(' ');
     write(offsets.push(index) + ' 0 obj');
     fn();
@@ -491,6 +493,9 @@ const toPDF = async (images: ImageData[]) => {
   return concat(pdfChunks);
 }
 
+const HOUGH_MATCH_RATIO = 1 / 40;
+const GRADIENT_ERROR = 32;
+
 const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
   console.time('document');
   const diag = Math.hypot(width, height);
@@ -528,12 +533,15 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
       const sx = 10 * (e - w) + 3 * (ne + se - nw - sw);
       const sy = 10 * (n - s) + 3 * (ne + nw - se - sw);
       const dir = sy / sx;
-      const grad = Math.hypot(sx, sy);
+      const grad = Math.pow(sx * sx + sy * sy, 0.3);
       // Add 128 to fix range. Note that this requires rotating the coordinate system
       const angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
+      for (let off = -GRADIENT_ERROR; off <= GRADIENT_ERROR; ++off) {
+        let ang = (angle + off) & 255;
+        const bin = (cos[ang] * i + sin[ang] * j + diag) >> 1;
+        buf[(bin << 8) + ang] += grad / (off * off + 3);
+      }
       // Two shifts because otherwise indexing is messed up by in-between values
-      const bin = (cos[angle] * i + sin[angle] * j + diag) >> 1;
-      buf[(bin << 8) + angle] += grad;
       gradBuf[px] = grad;
       totalGrad += grad;
     }
@@ -544,7 +552,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
   let max = 0.0;
   for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
   console.timeLog('document', 'tally2');
-  for (let threshold = max * 0.1, numTries = maxTries; numTries > 0; --numTries, threshold *= 0.5) {
+  for (let threshold = max * 0.05, numTries = maxTries; numTries > 0; --numTries, threshold *= 0.5) {
     let lines: Line[] = [];
     for (let bin = 0; bin < numBins; ++bin) {
       for (let angle = 0; angle < 256; ++angle) {
@@ -563,7 +571,8 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
       let strength = l1s;
       for (let j = i + 1; j < lines.length; ++j) {
         const { b, a, s } = lines[j];
-        if (Math.abs(l1b - b) <= maxBinErr && Math.abs(l1a - a) <= maxAngleErr) {
+        let angleErr = Math.abs(l1a - a);
+        if (Math.abs(l1b - b) <= maxBinErr && Math.min(angleErr, 256 - angleErr) <= maxAngleErr) {
           lines.splice(j, 1);
           strength += s;
           --j;
@@ -606,7 +615,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
       const sy = yi < yf ? 1 : -1;
       for (let x = xi, y = yi, err = dx + dy; x != xf || y != yf;) {
         const px = y * srcWidth + x;
-        score += (gradBuf[px] || 0) - avgGrad - avgGrad;
+        score += (gradBuf[px] || 0) - avgGrad;
         const e2 = err * 2;
         if (e2 >= dy) {
           err += dy;
@@ -618,21 +627,10 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
         }
       }
       // Low dependence on length
-      return Math.max(score, 0) * Math.pow(dx * dx + dy * dy, -0.3);
+      return score * (Math.pow(dx - dy, -0.6) || 0);
     }
     const scoreQuad = ({ a, b, c, d }: Quad) => {
-      // const ab = Math.hypot(a.x - b.x, a.y - b.y);
-      // const bc = Math.hypot(b.x - c.x, b.y - c.y);
-      // const cd = Math.hypot(c.x - d.x, c.y - d.y);
-      // const ad = Math.hypot(d.x - a.x, d.y - a.y);
-      // let rat: number;
-      // if (ab + cd > bc + ad) {
-      //   rat = Math.pow(Math.abs(((ab + cd) / (bc + ad)) - 11 / 8.5) + 1, 3);
-      // } else {
-      //   rat = Math.pow(Math.abs(((bc + ad) / (ab + cd)) - 11 / 8.5) + 1, 3);
-      // }
-      // rat = 1;
-      return Math.pow(scoreBetween(a, b) * scoreBetween(b, c) * scoreBetween(c, d) * scoreBetween(d, a), 2);
+      return Math.pow(scoreBetween(a, b) + scoreBetween(b, c) + scoreBetween(c, d) + scoreBetween(d, a), 2);
     }
     const rightErr = (l1: Line, l2: Line) => {
       const err = Math.abs(l1.a - l2.a) - 128;
@@ -640,9 +638,9 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
     }
     const scoreLines = (l1: Line, l2: Line, l3: Line, l4: Line) => {
       const e12 = rightErr(l1, l2), e23 = rightErr(l2, l3), e34 = rightErr(l3, l4), e41 = rightErr(l4, l1);
-      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.2) * Math.pow(l1.s * l2.s * l3.s * l4.s, 0.3);
+      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.3) * Math.pow(l1.s * l2.s * l3.s * l4.s, 0.1);
     }
-    const rects: { q: Quad; s: number; }[] = []
+    const rects: { q: Quad; s: number; }[] = [];
     for (let i = 0; i < lines.length; ++i) {
       const l1 = lines[i];
       for (let j = i + 1; j < lines.length; ++j) {
@@ -712,9 +710,10 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
     rects.sort((a, b) => b.s - a.s);
     console.log(rects);
     if (!rects.length) continue;
-    const rect = rects[0].q;
+    const rect = sortQuad(rects[0].q);
     if (process.env.NODE_ENV !== 'production') {
-      const ctx = plot(grayscaleToRGB(src, new Uint8ClampedArray(dst.length << 2)), srcWidth, srcHeight);
+      plot(grayscaleToRGB(normalize(gradBuf)), srcWidth, srcHeight);
+      const ctx = plot(grayscaleToRGB(src), srcWidth, srcHeight);
       for (const { b, a, s } of lines) {
         const bin = Math.round(b), angle = a * Math.PI / 256;
         ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
@@ -722,6 +721,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
         const s = Math.sin(angle);
         const rho = ((bin << 1) - diag);
         const x = s * rho, y = c * rho;
+        ctx.beginPath();
         ctx.moveTo(x + c * 10000, y - s * 10000);
         ctx.lineTo(x - c * 10000, y + s * 10000);
         ctx.stroke();
@@ -742,17 +742,25 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
       ctx.stroke();
       ctx.closePath();
     }
-    const sorted = sortQuad(rect);
-    sorted.a.x *= scaleFactor;
-    sorted.b.x *= scaleFactor;
-    sorted.c.x *= scaleFactor;
-    sorted.d.x *= scaleFactor;
-    sorted.a.y *= scaleFactor;
-    sorted.b.y *= scaleFactor;
-    sorted.c.y *= scaleFactor;
-    sorted.d.y *= scaleFactor;
     console.timeEnd('document');
-    return sorted;
+    return {
+      a: {
+        x: rect.a.x * scaleFactor,
+        y: rect.a.y * scaleFactor
+      },
+      b: {
+        x: rect.b.x * scaleFactor,
+        y: rect.b.y * scaleFactor
+      },
+      c: {
+        x: rect.c.x * scaleFactor,
+        y: rect.c.y * scaleFactor
+      },
+      d: {
+        x: rect.d.x * scaleFactor,
+        y: rect.d.y * scaleFactor
+      }
+    };
   }
 }
 
@@ -774,6 +782,7 @@ const perspective = ({ data, width, height }: ImageData, rect: Quad) => {
     d: { x: newWidth, y: newHeight }
   }, rect);
   const out = new Uint8ClampedArray(newWidth * newHeight * 4);
+  const offSW = width << 2, offSE = offSW + 4;
   for (let y = 0; y < newHeight; ++y) {
     for (let x = 0; x < newWidth; ++x) {
       const pt = projector({ x, y });
@@ -783,13 +792,15 @@ const perspective = ({ data, width, height }: ImageData, rect: Quad) => {
       out[dBase + 3] = 255;
       if (xf >= -1 && xf < width && yf >= -1 && yf < height) {
         const xt = pt.x - xf;
+        const xtr = 1 - xt;
         const yt = pt.y - yf;
+        const ytr = 1 - yt;
         const rawBase = (yf * width + xf) * 4;
         for (let i = 0; i < 3; ++i) {
           const base = rawBase + i;
-          let a = data[base] * (1 - xt) + data[base + 4] * xt;
-          let b = data[base + 4 * width] * (1 - xt) + data[base + 4 * width + 4] * xt;
-          out[dBase + i] = a * (1 - yt) + b * yt;
+          let a = data[base] * xtr + data[base + 4] * xt;
+          let b = data[base + offSW] * xtr + data[base + offSE] * xt;
+          out[dBase + i] = a * ytr + b * yt;
         }
       }
     }
@@ -823,8 +834,7 @@ const DocumentDetectionStream = () => {
   useEffect(() => {
     navigator.mediaDevices.getUserMedia({
       video: {
-        // width: { ideal: 4096 },
-        // height: { ideal: 2160 },
+        width: { ideal: 1080 },
         facingMode: 'environment'
       }
     }).then(mediaStream => {
@@ -872,14 +882,20 @@ const DocumentDetectionStream = () => {
 }
 
 const App = () => {
-  return <DocumentDetectionStream />
-  return <input type="file" accept="image/*" onChange={async ({ currentTarget: { files } }) => {
-    const img = await getImage(files![0]);
-    let rect = detectDocument(img);
-    if (rect) {
-      download(new Blob([await toPDF([perspective(img, rect)])]), 'out.pdf');
-    }
-  }}></input>
+  const [pages, setPages] = useState<ImageData[]>([]);
+  //return <DocumentDetectionStream />
+  return <>
+    <input type="file" accept="image/*" capture="environment" onChange={async ({ currentTarget: { files } }) => {
+      const img = await getImage(files![0]);
+      let rect = detectDocument(img);
+      if (rect) {
+        setPages(pages.concat(perspective(img, rect)))
+      }
+    }}></input>
+    <button onClick={async () => {
+      download(new Blob([await toPDF(pages)]), 'out.pdf')
+    }}>Done</button>
+  </>
 }
 
 render(<App />, document.getElementById('root'));
