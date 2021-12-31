@@ -77,12 +77,13 @@ const grayscale = (src: Uint8ClampedArray, dst = new Float32Array(src.buffer, sr
 }
 
 const downscale = (src: Float32Array, width: number, height: number, by: number, dst?: Float32Array) => {
-  const dw = Math.floor(width / by);
-  const dh = Math.floor(height / by);
+  const overBy = 1 / by;
+  const dw = Math.floor(width * overBy);
+  const dh = Math.floor(height * overBy);
   if (!dst) {
     dst = new Float32Array(dh * dw);
   }
-  const by2 = by * by, mi = dh - 1, mj = dw - 1;
+  const overBy2 = overBy * overBy, mi = dh - 1, mj = dw - 1;
   for (let i = 1; i < mi; ++i) {
     const si = i * by, sie = si + by, sif = Math.floor(si), sic = sif + 1, sief = Math.floor(sie);
     const sir = sic - si, sire = sie - sief;
@@ -107,7 +108,7 @@ const downscale = (src: Float32Array, width: number, height: number, by: number,
       sum += src[sif * width + sjef] * sir * sjre;
       sum += src[sief * width + sjf] * sire * sjr;
       sum += src[sief * width + sjef] * sire * sjre;
-      dst[i * dw + j] = sum / by2;
+      dst[i * dw + j] = sum * overBy2;
     }
   }
   for (let i = 1; i < mi; ++i) {
@@ -833,12 +834,30 @@ const done = document.getElementById('done') as HTMLButtonElement;
 
 const pages: ImageData[] = [];
 
+import init, { document as stuff } from '../pkg';
+let prom = init();
 imgInput.addEventListener('change', async () => {
   const img = await getImage(imgInput.files![0]);
-  let rect = detectDocument(img);
-  if (rect) {
-    pages.push(perspective(img, rect));
-  }
+  await prom;
+  const scaleFactor = 11.3;
+  console.time('init')
+  console.timeLog('init');
+  console.timeEnd('init')
+  console.time('wasm');
+  let wasmd = stuff(img.data as unknown as Uint8Array, img.width, img.height, scaleFactor);
+  console.timeLog('wasm');
+  console.timeEnd('wasm')
+  console.time('js');
+  const jsd = downscale(grayscale(img.data, new Float32Array(img.width * img.height)), img.width, img.height, scaleFactor);
+  console.timeLog('js');
+  console.timeEnd('js')
+  plot(grayscaleToRGB(wasmd), Math.floor(img.width / scaleFactor), Math.floor(img.height / scaleFactor));
+  plot(grayscaleToRGB(jsd), Math.floor(img.width / scaleFactor), Math.floor(img.height / scaleFactor));
+
+  // let rect = detectDocument(img);
+  // if (rect) {
+  //   pages.push(perspective(img, rect));
+  // }
 });
 
 done.addEventListener('click', async () => {
