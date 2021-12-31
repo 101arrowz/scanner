@@ -145,6 +145,11 @@ const gaussianKernel = new Float32Array([
   0.02516, 0.0566, 0.07547, 0.0566, 0.02516,
   0.01258, 0.02516, 0.03145, 0.02516, 0.01258
 ]);
+// const gaussianKernel = new Float32Array([
+//   0.01134, 0.08382, 0.01134,
+//   0.08382, 0.61935, 0.08382,
+//   0.01134, 0.08382, 0.01134
+// ]);
 
 const gaussianBlur = (src: Float32Array, width: number, height: number, dst?: Float32Array) =>
   convolve(src, width, height, gaussianKernel, 2, dst);
@@ -839,7 +844,8 @@ let prom = init();
 imgInput.addEventListener('change', async () => {
   const img = await getImage(imgInput.files![0]);
   await prom;
-  const scaleFactor = 11.3;
+  const scaleFactor = 11.9;
+  const nw = Math.floor(img.width / scaleFactor), nh = Math.floor(img.height / scaleFactor);
   console.time('init')
   console.timeLog('init');
   console.timeEnd('init')
@@ -848,11 +854,11 @@ imgInput.addEventListener('change', async () => {
   console.timeLog('wasm');
   console.timeEnd('wasm')
   console.time('js');
-  const jsd = downscale(grayscale(img.data, new Float32Array(img.width * img.height)), img.width, img.height, scaleFactor);
+  const jsd = gaussianBlur(downscale(grayscale(img.data, new Float32Array(img.width * img.height)), img.width, img.height, scaleFactor), nw, nh);
   console.timeLog('js');
   console.timeEnd('js')
-  plot(grayscaleToRGB(wasmd), Math.floor(img.width / scaleFactor), Math.floor(img.height / scaleFactor));
-  plot(grayscaleToRGB(jsd), Math.floor(img.width / scaleFactor), Math.floor(img.height / scaleFactor));
+  plot(grayscaleToRGB(wasmd), nw, nh);
+  plot(grayscaleToRGB(jsd), nw, nh);
 
   // let rect = detectDocument(img);
   // if (rect) {

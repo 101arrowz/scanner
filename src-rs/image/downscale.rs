@@ -1,13 +1,19 @@
 use super::Image;
+use alloc::vec::Vec;
 
 // TODO: SIMD
 pub fn downscale(source: &Image, by: f32) -> Image {
     assert!(by > 1.0);
-    let &Image { data: ref source, width, height } = source;
+    let &Image {
+        data: ref source,
+        width,
+        height,
+    } = source;
     let over_by = 1.0 / by;
     let dw = (width as f32 * over_by) as usize;
     let dh = (height as f32 * over_by) as usize;
-    let mut data = vec![0.0; dh * dw];
+    let mut data = Vec::with_capacity(dw * dh);
+    unsafe { data.set_len(data.capacity()) }
     let over_by2 = over_by * over_by;
     let mi = dh - 1;
     let mj = dw - 1;
@@ -31,35 +37,53 @@ pub fn downscale(source: &Image, by: f32) -> Image {
             let mut sum = 0.0;
             for rsi in sic..sief {
                 for rsj in sjc..sjef {
-                    sum += source[rsi * width + rsj];
+                    sum += unsafe { *source.get_unchecked(rsi * width + rsj) };
                 }
             }
             for rsj in sjc..sjef {
-                sum += source[sif * width + rsj] * sir + source[sief * width + rsj] * sire;
+                sum += unsafe {
+                    *source.get_unchecked(sif * width + rsj) * sir
+                        + *source.get_unchecked(sief * width + rsj) * sire
+                };
             }
             for rsi in sic..sief {
-                sum += source[rsi * width + sjf] * sjr + source[rsi * width + sjef] * sjre;
+                sum += unsafe {
+                    *source.get_unchecked(rsi * width + sjf) * sjr
+                        + *source.get_unchecked(rsi * width + sjef) * sjre
+                };
             }
-            sum += source[sif * width + sjf] * sir * sjr;
-            sum += source[sif * width + sjef] * sir * sjre;
-            sum += source[sief * width + sjf] * sire * sjr;
-            sum += source[sief * width + sjef] * sire * sjre;
-            data[ib + j] = sum * over_by2;
+            unsafe {
+                sum += *source.get_unchecked(sif * width + sjf) * sir * sjr;
+                sum += *source.get_unchecked(sif * width + sjef) * sir * sjre;
+                sum += *source.get_unchecked(sief * width + sjf) * sire * sjr;
+                sum += *source.get_unchecked(sief * width + sjef) * sire * sjre;
+            }
+            unsafe {
+                *data.get_unchecked_mut(ib + j) = sum * over_by2;
+            }
         }
     }
     for i in 1..mi {
         let ib = i * dw;
         let ibe = ib + mj;
-        data[ib] = data[ib + 1];
-        data[ibe] = data[ibe - 1];
+        unsafe {
+            *data.get_unchecked_mut(ib) = *data.get_unchecked(ib + 1);
+            *data.get_unchecked_mut(ibe) = *data.get_unchecked(ibe - 1);
+        }
     }
     let mibe = mi * dw;
     let mib = mibe - dw;
     for j in 0..dw {
-        data[j] = data[j + dw];
-        data[mibe + j] = data[mib + j];
+        unsafe {
+            *data.get_unchecked_mut(j) = *data.get_unchecked(dw + j);
+            *data.get_unchecked_mut(mibe + j) = *data.get_unchecked(mib + j);
+        }
     }
-    Image { data, width: dw, height: dh }
+    Image {
+        data,
+        width: dw,
+        height: dh,
+    }
 }
 
 // let over_by = 1.0 / by;
