@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 
-use self::gaussian::gaussian;
 mod document;
 mod downscale;
 mod gaussian;
 mod grayscale;
+pub use document::{GradientVotesResult, Line, Point, Quad, ScoredQuad};
 
 pub struct Image {
     pub data: Vec<f32>,
@@ -18,6 +18,27 @@ impl Image {
     }
     pub fn gaussian(&self) -> Image {
         gaussian::gaussian(self)
+    }
+    pub fn gradient(&self) -> Vec<f32> {
+        let result = document::gradient_votes(self);
+        result.grad_buf
+    }
+    pub fn buf(&self) -> Vec<f32> {
+        let result = document::gradient_votes(self);
+        result.buf
+    }
+    pub fn edges(&self) -> Vec<Line> {
+        let result = document::gradient_votes(self);
+        let mut edges = document::edges(&result, 0.05);
+        edges.sort_unstable_by(|a, b| b.cmp(a));
+        edges
+    }
+    pub fn quads(&self) -> Vec<ScoredQuad> {
+        let result = document::gradient_votes(self);
+        let mut edges = document::edges(&result, 0.05);
+        edges.truncate(20);
+        edges.sort_unstable_by(|a, b| b.cmp(a));
+        document::documents(&result, &edges)
     }
 }
 

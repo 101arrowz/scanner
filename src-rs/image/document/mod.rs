@@ -1,5 +1,8 @@
+use core::cmp::Ordering;
+
 mod consts;
 mod detect;
+
 pub use detect::*;
 
 #[derive(Clone, Copy)]
@@ -20,4 +23,21 @@ pub struct Quad {
 pub struct ScoredQuad {
     pub quad: Quad,
     pub score: f32,
+}
+
+impl PartialEq for ScoredQuad {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.eq(&other.score)
+    }
+}
+impl Eq for ScoredQuad {}
+impl PartialOrd for ScoredQuad {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.score.partial_cmp(&other.score)
+    }
+}
+impl Ord for ScoredQuad {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score.partial_cmp(&other.score).unwrap()
+    }
 }

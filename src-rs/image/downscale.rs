@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 // TODO: SIMD
 pub fn downscale(source: &Image, by: f32) -> Image {
-    assert!(by > 1.0);
+    assert!(by >= 1.0);
     let &Image {
         data: ref source,
         width,

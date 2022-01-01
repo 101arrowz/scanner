@@ -82,7 +82,7 @@ pub fn gaussian(source: &Image) -> Image {
     let hmb2 = hmb - width;
     let hmbe = hmb + width;
     let w2 = width + width;
-    for j in 0..height {
+    for j in 0..width {
         unsafe {
             let val = *data.get_unchecked(w2 + j);
             *data.get_unchecked_mut(width + j) = val;

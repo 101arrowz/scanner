@@ -498,21 +498,23 @@ const toPDF = async (images: ImageData[]) => {
   return concat(pdfChunks);
 }
 
-const HOUGH_MATCH_RATIO = 1 / 40;
+const HOUGH_MATCH_RATIO = 1 / 20;
 const GRADIENT_ERROR = 32;
 
 const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
   console.time('document');
-  const diag = Math.hypot(width, height);
-  const numBins = Math.floor(diag);
   let scaleFactor = width / 360;
   if (scaleFactor < 2) {
     scaleFactor = 1;
   } else if (scaleFactor > 5) {
     scaleFactor = 5;
   }
-  const srcWidth = Math.floor(width / scaleFactor);
-  const srcHeight = Math.floor(height / scaleFactor);
+  // This logic necessary for edge cases
+  const scaleRatio = 1 / scaleFactor;
+  const srcWidth = Math.floor(width * scaleRatio);
+  const srcHeight = Math.floor(height * scaleRatio);
+  const diag = Math.hypot(srcWidth, srcHeight);
+  const numBins = Math.floor(diag);
   const srcLen = srcWidth * srcHeight;
   const scratch = new Float32Array(srcLen * 3 + (numBins << 8));
   const dst = scratch.subarray(0, srcLen);
@@ -529,7 +531,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
   console.timeLog('document', 'blur');
   const east = 1, southwest = srcWidth - 1, south = srcWidth, southeast = srcWidth + 1;
   const iim = srcHeight - 1, jim = srcWidth - 1;
-  let totalGrad = 0.0;
+  let totalGrad = 0.0, max = 0.0;
   for (let i = 1; i < iim; ++i) {
     for (let j = 1; j < jim; ++j) {
       const px = i * srcWidth + j;
@@ -541,10 +543,12 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
       const grad = Math.pow(sx * sx + sy * sy, 0.3);
       // Add 128 to fix range. Note that this requires rotating the coordinate system
       const angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
-      for (let off = -GRADIENT_ERROR; off <= GRADIENT_ERROR; ++off) {
-        let ang = (angle + off) & 255;
-        const bin = (cos[ang] * i + sin[ang] * j + diag) >> 1;
-        buf[(bin << 8) + ang] += grad / (off * off + 3);
+      if (!isNaN(angle)) {
+        for (let off = -GRADIENT_ERROR; off <= GRADIENT_ERROR; ++off) {
+          let ang = (angle + off) & 255;
+          const bin = (cos[ang] * i + sin[ang] * j + diag) >> 1;
+          max = Math.max(max, buf[(bin << 8) + ang] += grad / (off * off + 3));
+        }
       }
       // Two shifts because otherwise indexing is messed up by in-between values
       gradBuf[px] = grad;
@@ -554,8 +558,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
   const avgGrad = totalGrad / ((srcHeight - 2) * (srcWidth - 2));
   console.timeLog('document', 'tally');
   type Line = { b: number; a: number; s: number; };
-  let max = 0.0;
-  for (let px = 0; px < buf.length; ++px) max = Math.max(buf[px], max);
+  console.log(avgGrad, max, buf);
   console.timeLog('document', 'tally2');
   for (let threshold = max * 0.05, numTries = maxTries; numTries > 0; --numTries, threshold *= 0.5) {
     let lines: Line[] = [];
@@ -643,7 +646,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
     }
     const scoreLines = (l1: Line, l2: Line, l3: Line, l4: Line) => {
       const e12 = rightErr(l1, l2), e23 = rightErr(l2, l3), e34 = rightErr(l3, l4), e41 = rightErr(l4, l1);
-      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.3) * Math.pow(l1.s * l2.s * l3.s * l4.s, 0.1);
+      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.3) * Math.pow(l1.s * l2.s * l3.s * l4.s, 0.5);
     }
     const rects: { q: Quad; s: number; }[] = [];
     for (let i = 0; i < lines.length; ++i) {
@@ -719,7 +722,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
     if (process.env.NODE_ENV != 'production') {
       plot(grayscaleToRGB(normalize(gradBuf)), srcWidth, srcHeight);
       const ctx = plot(grayscaleToRGB(src), srcWidth, srcHeight);
-      for (const { b, a, s } of lines) {
+      for (const { b, a, s } of lines.slice(0, 20)) {
         const bin = Math.round(b), angle = a * Math.PI / 256;
         ctx.strokeStyle = `rgba(255, 0, 0, ${1})`;
         const c = Math.cos(angle);
@@ -731,6 +734,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
         ctx.lineTo(x - c * 10000, y + s * 10000);
         ctx.stroke();
       }
+
       ctx.beginPath();
       ctx.strokeStyle = `rgba(0, 0, 255, ${1})`;
       ctx.lineWidth = 2;
@@ -844,26 +848,35 @@ let prom = init();
 imgInput.addEventListener('change', async () => {
   const img = await getImage(imgInput.files![0]);
   await prom;
-  const scaleFactor = 11.9;
-  const nw = Math.floor(img.width / scaleFactor), nh = Math.floor(img.height / scaleFactor);
   console.time('init')
   console.timeLog('init');
   console.timeEnd('init')
   console.time('wasm');
-  let wasmd = stuff(img.data as unknown as Uint8Array, img.width, img.height, scaleFactor);
+  let wasmd = stuff(img.data as unknown as Uint8Array, img.width, img.height, img.width / 360);
+  let quads = [];
+  for (let i = 0; i < wasmd.length; i += 9) {
+    const [ax, ay, bx, by, cx, cy, dx, dy, score] = wasmd.subarray(i, i + 9);
+    quads.push({
+      a: { x: ax, y: ay },
+      b: { x: bx, y: by },
+      c: { x: cx, y: cy },
+      d: { x: dx, y: dy },
+      s: score
+    })
+  }
+  
   console.timeLog('wasm');
   console.timeEnd('wasm')
   console.time('js');
-  const jsd = gaussianBlur(downscale(grayscale(img.data, new Float32Array(img.width * img.height)), img.width, img.height, scaleFactor), nw, nh);
+  let rect = detectDocument(img);
   console.timeLog('js');
   console.timeEnd('js')
-  plot(grayscaleToRGB(wasmd), nw, nh);
-  plot(grayscaleToRGB(jsd), nw, nh);
+  // plot(grayscaleToRGB(normalize(wasmd)), 360, 270)
 
-  // let rect = detectDocument(img);
-  // if (rect) {
-  //   pages.push(perspective(img, rect));
-  // }
+  console.log(rect, quads)
+  if (rect) {
+    pages.push(perspective(img, rect));
+  }
 });
 
 done.addEventListener('click', async () => {
