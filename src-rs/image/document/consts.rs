@@ -1,4 +1,11 @@
+use core::f32::consts::PI;
+
 // Following precalculated from JS script
+
+pub const ANGS_PER_RAD: f32 = 256.0 / PI;
+pub const GRADIENT_ERROR: u8 = 32;
+pub const HOUGH_MATCH_RATIO: f32 = 1.0 / 40.0;
+pub const MAX_ANG_ERROR: u8 = (HOUGH_MATCH_RATIO * 256.0) as u8;
 
 pub const SIN: [f32; 256] = [
     6.123234262925839e-17,

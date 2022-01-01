@@ -1,7 +1,8 @@
 use super::Image;
 use alloc::vec::Vec;
 
-// NOTE: empirical tests showed repeated box blur is roughly the same performance or worse for this case
+// NOTE: empirical tests showed repeated box blur is roughly the same performance
+// I didn't do full tests so it's something to consider for the future if this becomes a bottleneck
 
 pub fn gaussian(source: &Image) -> Image {
     let &Image {
