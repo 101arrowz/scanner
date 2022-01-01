@@ -2,8 +2,10 @@ use core::cmp::Ordering;
 
 mod consts;
 mod detect;
+mod perspective;
 
 pub use detect::*;
+pub use perspective::*;
 
 #[derive(Clone, Copy)]
 pub struct Point {

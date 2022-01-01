@@ -19,20 +19,6 @@ impl Image {
     pub fn gaussian(&self) -> Image {
         gaussian::gaussian(self)
     }
-    pub fn gradient(&self) -> Vec<f32> {
-        let result = document::gradient_votes(self);
-        result.grad_buf
-    }
-    pub fn buf(&self) -> Vec<f32> {
-        let result = document::gradient_votes(self);
-        result.buf
-    }
-    pub fn edges(&self) -> Vec<Line> {
-        let result = document::gradient_votes(self);
-        let mut edges = document::edges(&result, 0.05);
-        edges.sort_unstable_by(|a, b| b.cmp(a));
-        edges
-    }
     pub fn quads(&self) -> Vec<ScoredQuad> {
         let result = document::gradient_votes(self);
         let mut edges = document::edges(&result, 0.05);
@@ -51,5 +37,8 @@ pub struct RGBAImage {
 impl RGBAImage {
     pub fn to_grayscale(&self) -> Image {
         grayscale::grayscale(self)
+    }
+    pub fn perspective(&self, quad: Quad, width: usize, height: usize) -> RGBAImage {
+        document::perspective(self, quad, width, height)
     }
 }

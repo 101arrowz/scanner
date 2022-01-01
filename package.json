@@ -5,6 +5,7 @@
   "repository": "https://github.com/101arrowz/scanner",
   "author": "Arjun Barrett",
   "license": "MIT",
+  "browserslist": ["IE 11"],
   "scripts": {
     "start": "parcel src/index.html",
     "build": "parcel build src/index.html"

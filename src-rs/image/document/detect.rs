@@ -74,7 +74,7 @@ pub fn gradient_votes(source: &Image) -> GradientVotesResult {
                     let buf_ind = (bin << 8) | ind;
                     let val = buf[buf_ind] + local_grad;
                     buf[buf_ind] = val;
-    
+
                     let approx = angle.wrapping_sub(off);
                     let ind = approx as usize;
                     let bin = (COS[ind] * ifl + SIN[ind] * jfl + diag) as usize >> 1;
@@ -101,11 +101,11 @@ pub fn gradient_votes(source: &Image) -> GradientVotesResult {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Line {
-    pub angle: u8,
-    pub bin: usize,
-    pub score: f32,
+    angle: u8,
+    bin: usize,
+    score: f32,
 }
 impl PartialEq for Line {
     fn eq(&self, other: &Self) -> bool {
@@ -218,55 +218,37 @@ pub fn documents(result: &GradientVotesResult, lines: &[Line]) -> Vec<ScoredQuad
     let ih = height as isize;
     let score_between = |a: Point, b: Point| {
         let mut score = 0.0;
-        // http://playtechs.blogspot.com/2007/03/raytracing-on-grid.html
-        let dx = (b.x - a.x).abs();
-        let dy = (b.y - a.y).abs();
+
+        let xf = b.x as isize;
+        let yf = b.y as isize;
 
         let mut x = a.x as isize;
         let mut y = a.y as isize;
 
-        let mut n = 1;
-        let mut error: f32;
+        let dx = (xf - x).abs();
+        let dy = -(yf - y).abs();
+        let sx = if x < xf { 1 } else { -1 };
+        let sy = if y < yf { 1 } else { -1 };
 
-        let x_inc = if dx == 0.0 {
-            error = f32::INFINITY;
-            0
-        } else if b.x > a.x {
-            n += b.x as isize - x;
-            error = (1.0 - a.x.fract()) * dy;
-            1
-        } else {
-            n += x - b.x as isize;
-            error = a.x.fract() * dy;
-            -1
-        };
+        let mut error = dx + dy;
 
-        let y_inc = if dy == 0.0 {
-            error -= f32::INFINITY;
-            0
-        } else if b.y > a.y {
-            n += b.y as isize - y;
-            error -= (1.0 - a.y.fract()) * dx;
-            1
-        } else {
-            n += y - b.y as isize;
-            error -= a.y.fract() * dx;
-            -1
-        };
-
-        for _ in 0..n {
-            if 0 <= x && 0 <= y && x <= iw && y <= ih {
+        while x != xf || y != yf {
+            if 0 <= x && 0 <= y && x < iw && y < ih {
                 score += unsafe { *grad_buf.as_ptr().offset(y * iw + x) } - avg_grad;
             }
-            if error > 0.0 {
-                x = x.wrapping_add(x_inc);
-                error -= dy;
-            } else {
-                y = y.wrapping_add(y_inc);
+
+            let e2 = error << 1;
+            if e2 >= dy {
+                error += dy;
+                x += sx;
+            }
+            if e2 <= dx {
                 error += dx;
+                y += sy;
             }
         }
-        score * (n as f32).powf(-0.6)
+
+        (score * ((dx - dy) as f32).powf(-0.6)).max(0.0)
     };
     let scored_quad = |quad: Quad, l1: Line, l2: Line, l3: Line, l4: Line| {
         let edge_total = score_between(quad.a, quad.b)
@@ -279,7 +261,7 @@ pub fn documents(result: &GradientVotesResult, lines: &[Line]) -> Vec<ScoredQuad
         let e23 = right_err(l2, l3);
         let e34 = right_err(l3, l4);
         let e41 = right_err(l4, l1);
-        let angle_score = (e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41).powf(-0.3);
+        let angle_score = (e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41).powf(-0.1);
 
         let line_score = (l1.score * l2.score * l3.score * l4.score).powf(0.1);
 

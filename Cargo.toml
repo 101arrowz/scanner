@@ -9,4 +9,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2.78"
-console_error_panic_hook = "*"
+web-sys = { version = "0.3", features = ["ImageData"] }
+
+[profile.release]
+opt-level = 3
+lto = true

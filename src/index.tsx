@@ -498,7 +498,7 @@ const toPDF = async (images: ImageData[]) => {
   return concat(pdfChunks);
 }
 
-const HOUGH_MATCH_RATIO = 1 / 20;
+const HOUGH_MATCH_RATIO = 1 / 40;
 const GRADIENT_ERROR = 32;
 
 const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
@@ -540,7 +540,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
       const sx = 10 * (e - w) + 3 * (ne + se - nw - sw);
       const sy = 10 * (n - s) + 3 * (ne + nw - se - sw);
       const dir = sy / sx;
-      const grad = Math.pow(sx * sx + sy * sy, 0.3);
+      const grad = Math.pow(sx * sx + sy * sy, 0.3) || 0;
       // Add 128 to fix range. Note that this requires rotating the coordinate system
       const angle = Math.floor(Math.atan(dir) * 256 / Math.PI) + 128;
       if (!isNaN(angle)) {
@@ -558,7 +558,6 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
   const avgGrad = totalGrad / ((srcHeight - 2) * (srcWidth - 2));
   console.timeLog('document', 'tally');
   type Line = { b: number; a: number; s: number; };
-  console.log(avgGrad, max, buf);
   console.timeLog('document', 'tally2');
   for (let threshold = max * 0.05, numTries = maxTries; numTries > 0; --numTries, threshold *= 0.5) {
     let lines: Line[] = [];
@@ -606,7 +605,6 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
       return x * x + y * y <= 0.55;
     };
     lines.sort((a, b) => b.s - a.s);
-    console.log(lines);
     // Max 5000 quadrilaterals to check
     if (lines.length > 20) {
       lines = lines.slice(0, 20);
@@ -646,7 +644,7 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
     }
     const scoreLines = (l1: Line, l2: Line, l3: Line, l4: Line) => {
       const e12 = rightErr(l1, l2), e23 = rightErr(l2, l3), e34 = rightErr(l3, l4), e41 = rightErr(l4, l1);
-      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.3) * Math.pow(l1.s * l2.s * l3.s * l4.s, 0.5);
+      return Math.pow(e12 * e12 + e23 * e23 + e34 * e34 + e41 * e41, -0.3) * Math.pow(l1.s * l2.s * l3.s * l4.s, 0.1);
     }
     const rects: { q: Quad; s: number; }[] = [];
     for (let i = 0; i < lines.length; ++i) {
@@ -716,7 +714,6 @@ const detectDocument = ({ data, width, height }: ImageData, maxTries = 3) => {
     }
     console.timeLog('document', 'rects');
     rects.sort((a, b) => b.s - a.s);
-    console.log(rects);
     if (!rects.length) continue;
     const rect = sortQuad(rects[0].q);
     if (process.env.NODE_ENV != 'production') {
@@ -826,9 +823,6 @@ const normalize = (src: Float32Array, dst = src) => {
 
 const plot = (src: Uint8ClampedArray, width: number, height: number) => {
   const into = document.createElement('canvas');
-  into.addEventListener('click', e => {
-    console.log(`x: ${e.offsetX}, y: ${e.offsetY}`)
-  })
   into.width = width;
   into.height = height;
   const ctx = into.getContext('2d')!;
@@ -843,7 +837,7 @@ const done = document.getElementById('done') as HTMLButtonElement;
 
 const pages: ImageData[] = [];
 
-import init, { document as stuff } from '../pkg';
+import init, { extract_document } from '../pkg';
 let prom = init();
 imgInput.addEventListener('change', async () => {
   const img = await getImage(imgInput.files![0]);
@@ -852,31 +846,15 @@ imgInput.addEventListener('change', async () => {
   console.timeLog('init');
   console.timeEnd('init')
   console.time('wasm');
-  let wasmd = stuff(img.data as unknown as Uint8Array, img.width, img.height, img.width / 360);
-  let quads = [];
-  for (let i = 0; i < wasmd.length; i += 9) {
-    const [ax, ay, bx, by, cx, cy, dx, dy, score] = wasmd.subarray(i, i + 9);
-    quads.push({
-      a: { x: ax, y: ay },
-      b: { x: bx, y: by },
-      c: { x: cx, y: cy },
-      d: { x: dx, y: dy },
-      s: score
-    })
-  }
-  
+  let wasmd = extract_document(img, 1224, 1584);
   console.timeLog('wasm');
   console.timeEnd('wasm')
   console.time('js');
   let rect = detectDocument(img);
+  const jsd = perspective(img, rect!);
   console.timeLog('js');
   console.timeEnd('js')
-  // plot(grayscaleToRGB(normalize(wasmd)), 360, 270)
-
-  console.log(rect, quads)
-  if (rect) {
-    pages.push(perspective(img, rect));
-  }
+  pages.push(jsd, wasmd)
 });
 
 done.addEventListener('click', async () => {
