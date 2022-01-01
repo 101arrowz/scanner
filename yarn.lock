@@ -296,6 +296,20 @@
     slice-ansi "^4.0.0"
     string-width "^4.2.0"
 
+"@parcel/compressor-brotli@^2.0.1":
+  version "2.0.1"
+  resolved "https://registry.yarnpkg.com/@parcel/compressor-brotli/-/compressor-brotli-2.0.1.tgz#ea56a959c56a3765058e9bbab2b4c866104b61c4"
+  integrity sha512-p4wnjefu43rtgJye/sxNFE9k2H/9MEKXb0oGjQh5QAiSIOb9XUiDuXuzSEWuMeAUidGL//ENZE20hNMBI64/+w==
+  dependencies:
+    "@parcel/plugin" "^2.0.1"
+
+"@parcel/compressor-gzip@^2.0.1":
+  version "2.0.1"
+  resolved "https://registry.yarnpkg.com/@parcel/compressor-gzip/-/compressor-gzip-2.0.1.tgz#35352fb92bd9cbb2a2330863cd9cf00ae23043d4"
+  integrity sha512-y5rEi3sa0fRksfT6HJZn1G4yHjW0yCJYxe+2NSyJAv97rvVos58ZOWRMFIa8NmN2Rum20gs/LW7wH8vfz1LeVA==
+  dependencies:
+    "@parcel/plugin" "^2.0.1"
+
 "@parcel/compressor-raw@^2.0.1":
   version "2.0.1"
   resolved "https://registry.yarnpkg.com/@parcel/compressor-raw/-/compressor-raw-2.0.1.tgz#faa2586b0b569f9cf34c3c40206b7dd35fb8255c"

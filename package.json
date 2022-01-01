@@ -5,12 +5,16 @@
   "repository": "https://github.com/101arrowz/scanner",
   "author": "Arjun Barrett",
   "license": "MIT",
-  "browserslist": ["IE 11"],
+  "browserslist": [
+    "IE 11"
+  ],
   "scripts": {
     "start": "parcel src/index.html",
     "build": "parcel build src/index.html"
   },
   "devDependencies": {
+    "@parcel/compressor-brotli": "^2.0.1",
+    "@parcel/compressor-gzip": "^2.0.1",
     "@parcel/packager-raw-url": "^2.0.1",
     "parcel": "^2.0.1",
     "parcel-config-pwa-manifest": "^0.1.0",

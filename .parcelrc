@@ -2,5 +2,12 @@
     "extends": ["@parcel/config-default", "parcel-config-pwa-manifest"],
     "packagers": {
         "*.xml": "@parcel/packager-raw-url"
+    },
+    "compressors": {
+        "*.{xml,wasm,js,html,css,map,webmanifest}": [
+            "...",
+            "@parcel/compressor-gzip",
+            "@parcel/compressor-brotli"
+          ]
     }
 }
