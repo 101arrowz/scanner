@@ -1,4 +1,4 @@
-export const getImage = async (img: File) => {
+export const getImage = async (img: Blob) => {
   const elem = document.createElement('img');
   const loaded = new Promise<void>((resolve, reject) => {
     elem.onload = () => { resolve(); };
