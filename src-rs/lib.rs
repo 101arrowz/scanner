@@ -2,15 +2,19 @@
 #![feature(int_abs_diff)]
 #[macro_use]
 extern crate alloc;
+extern crate wee_alloc;
 
 use wasm_bindgen::{prelude::*, Clamped};
 use web_sys::ImageData;
 
+mod image;
+use image::{Quad, RGBAImage};
+
 #[cfg(not(target_arch = "wasm32"))]
 compile_error!("Only compilable to WASM");
 
-mod image;
-use image::{Quad, RGBAImage};
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 fn sum_sides(quad: Quad) -> (f32, f32) {
     let Quad { a, b, c, d } = quad;
@@ -78,21 +82,23 @@ fn sort_quad(quad: Quad) -> Quad {
     }
 }
 
+impl From<ImageData> for RGBAImage {
+    fn from(data: ImageData) -> Self {
+        let width = data.width() as usize;
+        let height = data.height() as usize;
+        let data = data.data().0;
+        RGBAImage {
+            data,
+            width,
+            height,
+        }
+    }
+}
+
 #[wasm_bindgen]
-pub fn extract_document(
-    data: ImageData,
-    target_width: usize,
-    target_height: Option<usize>,
-) -> ImageData {
-    let width = data.width() as usize;
-    let height = data.height() as usize;
-    let data = data.data().0;
-    let rgba = RGBAImage {
-        data,
-        width,
-        height,
-    };
-    let mut by = (width.min(height) as f32) / 360.0;
+pub fn find_document(data: ImageData, tries: Option<usize>) -> Option<Quad> {
+    let rgba: RGBAImage = data.into();
+    let mut by = (rgba.width.min(rgba.height) as f32) / 360.0;
     if by < 2.0 {
         by = 1.0
     }
@@ -100,23 +106,37 @@ pub fn extract_document(
     if by != 1.0 {
         src = src.downscale(by);
     }
-    let mut doc = sort_quad(src.gaussian().quads()[0].quad);
-    doc.a.x *= by;
-    doc.a.y *= by;
-    doc.b.x *= by;
-    doc.b.y *= by;
-    doc.c.x *= by;
-    doc.c.y *= by;
-    doc.d.x *= by;
-    doc.d.y *= by;
+    let quads = src.gaussian().quads(tries.unwrap_or(3));
+    quads.get(0).map(|doc| {
+        let mut doc = sort_quad(doc.quad);
+        doc.a.x *= by;
+        doc.a.y *= by;
+        doc.b.x *= by;
+        doc.b.y *= by;
+        doc.c.x *= by;
+        doc.c.y *= by;
+        doc.d.x *= by;
+        doc.d.y *= by;
+        doc
+    })
+}
+
+#[wasm_bindgen]
+pub fn extract_document(
+    data: ImageData,
+    region: Quad,
+    target_width: usize,
+    target_height: Option<usize>,
+) -> ImageData {
+    let rgba: RGBAImage = data.into();
     let target_height = if let Some(height) = target_height {
         height
     } else {
-        let (side, top) = sum_sides(doc);
+        let (side, top) = sum_sides(region);
         (side / top * (target_width as f32)) as usize
     };
     ImageData::new_with_u8_clamped_array_and_sh(
-        Clamped(&rgba.perspective(doc, target_width, target_height).data),
+        Clamped(&rgba.perspective(region, target_width, target_height).data),
         target_width as u32,
         target_height as u32,
     )

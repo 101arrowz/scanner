@@ -19,12 +19,24 @@ impl Image {
     pub fn gaussian(&self) -> Image {
         gaussian::gaussian(self)
     }
-    pub fn quads(&self) -> Vec<ScoredQuad> {
+    pub fn quads(&self, mut tries: usize) -> Vec<ScoredQuad> {
         let result = document::gradient_votes(self);
-        let mut edges = document::edges(&result, 0.05);
-        edges.truncate(20);
-        edges.sort_unstable_by(|a, b| b.cmp(a));
-        document::documents(&result, &edges)
+        let mut threshold = 0.20;
+        while tries > 0 {
+            tries -= 1;
+            let mut edges = document::edges(&result, threshold);
+            if edges.len() >= 20 {
+                tries = 0;
+                edges.truncate(20);
+            }
+            edges.sort_unstable_by(|a, b| b.cmp(a));
+            let documents = document::documents(&result, &edges);
+            if documents.len() > 0 {
+                return documents;
+            }
+            threshold *= 0.5;
+        }
+        Vec::new()
     }
 }
 

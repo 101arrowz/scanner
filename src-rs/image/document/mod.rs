@@ -1,4 +1,5 @@
 use core::cmp::Ordering;
+use wasm_bindgen::prelude::*;
 
 mod consts;
 mod detect;
@@ -7,12 +8,14 @@ mod perspective;
 pub use detect::*;
 pub use perspective::*;
 
+#[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub struct Point {
     pub x: f32,
     pub y: f32,
 }
 
+#[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub struct Quad {
     pub a: Point,

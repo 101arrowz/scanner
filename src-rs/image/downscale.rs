@@ -1,7 +1,9 @@
 use super::Image;
 use alloc::vec::Vec;
 
+// area-average downscaling
 // TODO: SIMD
+
 pub fn downscale(source: &Image, by: f32) -> Image {
     assert!(by >= 1.0);
     let &Image {

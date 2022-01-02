@@ -13,8 +13,8 @@ pub struct GradientVotesResult {
     width: usize,
     diag: f32,
     num_bins: usize,
-    pub buf: Vec<f32>,
-    pub grad_buf: Vec<f32>,
+    buf: Vec<f32>,
+    grad_buf: Vec<f32>,
     avg_grad: f32,
     max_grad: f32,
 }

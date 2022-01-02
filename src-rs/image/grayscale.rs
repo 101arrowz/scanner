@@ -1,6 +1,8 @@
 use super::{Image, RGBAImage};
 
+// grayscale and fit range to 0-1
 // TODO: SIMD
+
 pub fn grayscale(source: &RGBAImage) -> Image {
     let &RGBAImage {
         data: ref source,
