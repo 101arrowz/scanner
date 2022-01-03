@@ -60,13 +60,17 @@ const mobile = /(iPad)|(iPhone)|(iPod)|(android)|(webOS)/i.test(navigator.userAg
 const startStream = async (device?: string) => {
   const maxRes = await getMaxRes(device);
   let aspectRatio = maxRes.width / maxRes.height;
+  if (aspectRatio < 1 / aspectRatio) {
+    aspectRatio = 1 / aspectRatio;
+  }
   const landscape = window.innerWidth > (window.innerHeight * aspectRatio);
+  const mobileLandscape = mobile && window.innerWidth > window.innerHeight;
   root.style.flexDirection = landscape ? 'row' : 'column';
-  const height = landscape ? window.innerHeight : Math.floor(window.innerWidth * (mobile && window.innerWidth > window.innerHeight ? 1 / aspectRatio : aspectRatio));
-  const width = landscape ? Math.floor(window.innerHeight * (mobile ? aspectRatio : 1 / aspectRatio)) : window.innerWidth;
+  const height = landscape ? window.innerHeight : Math.floor(Math.min(window.innerWidth * aspectRatio, window.innerHeight * 0.9));
+  const width = landscape ? Math.floor(Math.min(window.innerHeight * aspectRatio, window.innerWidth * 0.9)) : window.innerWidth;
   const constraints: MediaTrackConstraints = {
-    width: height,
-    height: width,
+    width: maxRes.width, //mobile && !landscape ? height : width,
+    height: maxRes.height,//mobile && !landscape ? width : height,
     facingMode: 'environment',
     deviceId: { exact: maxRes.deviceId }
   };
@@ -76,6 +80,8 @@ const startStream = async (device?: string) => {
   const videoTrack = stream.getVideoTracks()[0];
   preview.srcObject = stream;
   const settings = videoTrack.getSettings()
+  console.log(width, height, settings, videoTrack.getConstraints());
+  log(`${window.innerWidth} ${window.innerHeight} ${width} ${height} ${maxRes.width} ${maxRes.height}`)
   const cssHeight = height + 'px';
   const cssWidth = width + 'px';
   if (landscape) {
@@ -85,11 +91,12 @@ const startStream = async (device?: string) => {
     preview.style.height = '';
     preview.style.width = cssWidth;
   }
-  // previewCrop.style.width = cssWidth;
-  // previewCrop.style.height = cssHeight;
+  // log(`${width} ${height} ${window.innerHeight * aspectRatio}`)
+  previewCrop.style.width = previewCrop.style.minWidth = cssWidth;
+  previewCrop.style.height = previewCrop.style.minHeight = cssHeight;
   const cap = new ImageCapture(videoTrack);
   const onShutterClick = async () => {
-    await wasmLoaded;
+     await wasmLoaded;
     const img = await getImage(await cap.takePhoto());
     const doc = extract_document(img, find_document(img)!, 1224);
     download(new Blob([await toPDF([doc])]), 'out.pdf')
