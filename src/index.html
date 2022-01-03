@@ -17,11 +17,11 @@
 </head>
 <body>
     <div id="root" style="display:flex; flex-direction: row; justify-content: center; align-items: center;">
-        <div id="preview-crop" style="display: flex; justify-content: center; align-items: center; overflow: hidden">
-            <video id="preview"></video>
+        <div id="preview-crop" style="display: flex; justify-content: center; align-items: center; overflow: hidden;">
+            <video id="preview" autoplay playsinline></video>
         </div>
         <select id="camera-select"></select>
-        <span id="shutter" style="cursor:pointer">shutter</span>
+        <img id="shutter" style="cursor: pointer; height: 5vh" src="camera.png"></img>
     </div>
     <script type="module" src="index.ts"></script>
 </body>

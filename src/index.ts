@@ -18,6 +18,12 @@ let defaultMaxRes: Promise<MaxRes>;
 let maxRes: Record<string, Promise<MaxRes> | undefined> = {};
 let wasmLoaded: Promise<void>;
 
+const log = (text: string) => {
+  const el = document.createElement('div');
+  el.innerText = text;
+  root.appendChild(el);
+}
+
 const getMaxRes = (device?: string) => {
   const constraints: MediaTrackConstraints = {
     width: 100000,
@@ -37,31 +43,30 @@ const getMaxRes = (device?: string) => {
     for (const track of media.getTracks()) {
       track.stop();
     }
-    return { width: settings.width!, height: settings.height!, deviceId: settings.deviceId! };
+    const width = Math.max(settings.width!, settings.height!);
+    const height = Math.min(settings.width!, settings.height!);
+    return { width, height, deviceId: settings.deviceId! };
   });
   if (device) maxRes[device] = prom;
-  else defaultMaxRes = prom;
+  else defaultMaxRes = prom.then(val => {
+    maxRes[val.deviceId] = prom;
+    return val;
+  });
   return prom;
 }
 
-type StreamResult = {
-  deviceId: string;
-  close(): void;
-}
+const mobile = /(iPad)|(iPhone)|(iPod)|(android)|(webOS)/i.test(navigator.userAgent);
 
-const startStream = async (device?: string): Promise<StreamResult> => {
+const startStream = async (device?: string) => {
   const maxRes = await getMaxRes(device);
-  if (!device) {
-    // Use first device by default
-    const device = (await navigator.mediaDevices.enumerateDevices()).find(device => device.kind == 'videoinput')!.deviceId;
-    return startStream(device);
-  }
-  const aspectRatio = maxRes.width / maxRes.height;
+  let aspectRatio = maxRes.width / maxRes.height;
   const landscape = window.innerWidth > (window.innerHeight * aspectRatio);
   root.style.flexDirection = landscape ? 'row' : 'column';
+  const height = landscape ? window.innerHeight : Math.floor(window.innerWidth * (mobile && window.innerWidth > window.innerHeight ? 1 / aspectRatio : aspectRatio));
+  const width = landscape ? Math.floor(window.innerHeight * (mobile ? aspectRatio : 1 / aspectRatio)) : window.innerWidth;
   const constraints: MediaTrackConstraints = {
-    height: landscape ? window.innerHeight : Math.floor(Math.min(window.innerWidth / aspectRatio, window.innerHeight * 0.9)),
-    width: landscape ? Math.floor(Math.min(window.innerHeight * aspectRatio, window.innerWidth * 0.9)) : window.innerWidth,
+    width: height,
+    height: width,
     facingMode: 'environment',
     deviceId: { exact: maxRes.deviceId }
   };
@@ -69,10 +74,10 @@ const startStream = async (device?: string): Promise<StreamResult> => {
     video: constraints
   });
   const videoTrack = stream.getVideoTracks()[0];
-  const settings = videoTrack.getSettings();
   preview.srcObject = stream;
-  const cssHeight = constraints.height as number + 'px';
-  const cssWidth = constraints.width as number + 'px';
+  const settings = videoTrack.getSettings()
+  const cssHeight = height + 'px';
+  const cssWidth = width + 'px';
   if (landscape) {
     preview.style.height = cssHeight;
     preview.style.width = '';
@@ -80,14 +85,12 @@ const startStream = async (device?: string): Promise<StreamResult> => {
     preview.style.height = '';
     preview.style.width = cssWidth;
   }
-  previewCrop.style.width = constraints.width as number + 'px';
-  previewCrop.style.height = constraints.height as number + 'px';
-  preview.play();
+  // previewCrop.style.width = cssWidth;
+  // previewCrop.style.height = cssHeight;
   const cap = new ImageCapture(videoTrack);
   const onShutterClick = async () => {
     await wasmLoaded;
     const img = await getImage(await cap.takePhoto());
-    document.body.append(`${JSON.stringify(videoTrack.getSettings())} ${JSON.stringify(constraints)} ${JSON.stringify(videoTrack.getConstraints())} ${JSON.stringify(maxRes)} ${preview.videoWidth} ${preview.videoHeight} ${img.width} ${img.height}`)
     const doc = extract_document(img, find_document(img)!, 1224);
     download(new Blob([await toPDF([doc])]), 'out.pdf')
   }
@@ -108,7 +111,7 @@ const startStream = async (device?: string): Promise<StreamResult> => {
 
 const onLoad = async () => {
   wasmLoaded = init().then();
-  const stream = await startStream();
+  let stream = await startStream(localStorage.getItem('defaultDevice')!);
   for (const device of await navigator.mediaDevices.enumerateDevices()) {
     if (device.kind == 'videoinput') {
       const option = document.createElement('option');
@@ -118,9 +121,12 @@ const onLoad = async () => {
     }
   }
   select.value = stream.deviceId;
-  const onUpdate = () => {
+  const onUpdate = async () => {
     stream.close();
-    startStream(select.value)
+    select.disabled = true;
+    localStorage.setItem('defaultDevice', select.value);
+    stream = await startStream(select.value);
+    select.disabled = false;
   };
   select.onchange = onUpdate;
   let rst = -1;

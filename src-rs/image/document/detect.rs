@@ -67,7 +67,7 @@ pub fn gradient_votes(source: &Image) -> GradientVotesResult {
                 buf[buf_ind] = val;
                 max_grad = max_grad.max(val);
                 for off in 1..=GRADIENT_ERROR {
-                    let local_grad = grad / ((off * off + 3) as f32);
+                    let local_grad = grad / (off as f32 * off as f32 + 3.0);
                     let approx = angle.wrapping_add(off);
                     let ind = approx as usize;
                     let bin = (COS[ind] * ifl + SIN[ind] * jfl + diag) as usize >> 1;
@@ -165,7 +165,7 @@ pub fn edges(result: &GradientVotesResult, threshold: f32) -> Vec<Line> {
             } = lines[j];
             let angle_diff = angle.wrapping_sub(a2);
             if bin.abs_diff(b2) <= max_bin_err
-                && angle_diff.min(255 - angle_diff + 1) <= MAX_ANG_ERROR
+                && angle_diff.min(0u8.wrapping_sub(angle_diff)) <= MAX_ANG_ERROR
             {
                 lines.remove(j);
                 score += s2;

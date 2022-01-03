@@ -94,7 +94,7 @@ pub fn perspective(source: &RGBAImage, quad: Quad, width: usize, height: usize) 
             let yf = pt.y as usize;
             let dest_base = (ib + x) << 2;
             data[dest_base + 3] = 255;
-            if xf < source.width && yf < source.height {
+            if xf + 1 < source.width && yf + 1 < source.height {
                 let xt = pt.x.fract();
                 let xtr = 1.0 - xt;
                 let yt = pt.y.fract();
