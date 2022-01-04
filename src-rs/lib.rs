@@ -96,6 +96,21 @@ impl From<ImageData> for RGBAImage {
     }
 }
 
+// #[wasm_bindgen]
+// pub fn find_edges(data: ImageData, threshold: f32) -> Array {
+//     console_error_panic_hook::set_once();
+//     let rgba: RGBAImage = data.into();
+//     let mut by = (rgba.width.min(rgba.height) as f32) / 360.0;
+//     if by < 2.0 {
+//         by = 1.0
+//     }
+//     let mut src = rgba.to_grayscale();
+//     if by != 1.0 {
+//         src = src.downscale(by);
+//     }
+//     src.gaussian().edges(threshold).into_iter().map(JsValue::from).collect()
+// }
+
 #[wasm_bindgen]
 pub fn find_document(data: ImageData, tries: Option<usize>) -> Option<Quad> {
     console_error_panic_hook::set_once();
