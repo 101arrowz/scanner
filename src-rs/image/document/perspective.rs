@@ -56,13 +56,13 @@ fn create_projector(from: Quad, to: Quad) -> impl Fn(Point) -> Point {
     let src_basis = basis_to_points(from);
     let dst_basis = basis_to_points(to);
     let proj = mul(dst_basis, adj(src_basis));
-    return move |pt: Point| {
+    move |pt: Point| {
         let projected = mulv(proj, [pt.x, pt.y, 1.0]);
         Point {
             x: projected[0] / projected[2],
             y: projected[1] / projected[2],
         }
-    };
+    }
 }
 
 pub fn perspective(source: &RGBAImage, quad: Quad, width: usize, height: usize) -> RGBAImage {

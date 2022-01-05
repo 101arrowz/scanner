@@ -2,7 +2,6 @@ use core::cmp::Ordering;
 
 use super::super::Image;
 use alloc::vec::Vec;
-
 use super::{
     consts::{ANGS_PER_RAD, COS, GRADIENT_ERROR, HOUGH_MATCH_RATIO, MAX_ANG_ERROR, SIN},
     Point, Quad, ScoredQuad,
@@ -100,6 +99,15 @@ pub fn gradient_votes(source: &Image) -> GradientVotesResult {
         max_grad,
     }
 }
+
+// use wasm_bindgen::prelude::*;
+// #[wasm_bindgen]
+// #[derive(Clone, Copy)]
+// pub struct Line {
+//     pub angle: u8,
+//     pub bin: usize,
+//     pub score: f32,
+// }
 
 #[derive(Clone, Copy)]
 pub struct Line {
@@ -248,14 +256,14 @@ pub fn documents(result: &GradientVotesResult, lines: &[Line]) -> Vec<ScoredQuad
             }
         }
 
-        (score * ((dx - dy) as f32).powf(-0.6)).max(0.0)
+        (score * ((dx - dy) as f32).powf(-0.3)).max(0.0)
     };
     let scored_quad = |quad: Quad, l1: Line, l2: Line, l3: Line, l4: Line| {
         let edge_total = score_between(quad.a, quad.b)
             + score_between(quad.b, quad.c)
             + score_between(quad.c, quad.d)
             + score_between(quad.d, quad.a);
-        let edge_score = edge_total * edge_total;
+        let edge_score = edge_total.powf(3.0);
 
         let e12 = right_err(l1, l2);
         let e23 = right_err(l2, l3);

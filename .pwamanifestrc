@@ -1,6 +1,8 @@
 {
   "name": "Document Scanner",
   "disabled": true,
+  "theme": "black",
+  "display": "standalone",
   "iconGenOpts": {
     "baseIcon": "src/icon.png",
     "genFavicons": true

@@ -27,7 +27,7 @@ impl Image {
     // }
     pub fn quads(&self, mut tries: usize) -> Vec<ScoredQuad> {
         let result = document::gradient_votes(self);
-        let mut threshold = 0.20;
+        let mut threshold = 0.01;
         while tries > 0 {
             tries -= 1;
             let mut edges = document::edges(&result, threshold);
@@ -37,7 +37,7 @@ impl Image {
             }
             edges.sort_unstable_by(|a, b| b.cmp(a));
             let documents = document::documents(&result, &edges);
-            if documents.len() > 0 {
+            if !documents.is_empty() {
                 return documents;
             }
             threshold *= 0.5;

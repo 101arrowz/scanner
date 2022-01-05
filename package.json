@@ -19,6 +19,7 @@
     "typescript": "^4.4.4"
   },
   "dependencies": {
-    "@parcel/service-worker": "^2.0.1"
+    "@parcel/service-worker": "^2.0.1",
+    "image-capture": "^0.4.0"
   }
 }

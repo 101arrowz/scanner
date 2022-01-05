@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Scanner</title>
@@ -12,16 +13,39 @@
             background: black;
             color: white;
             overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+        #top-wrapper, #bottom-wrapper {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            width: 100vw;
         }
     </style>
 </head>
 <body>
-    <div id="root" style="display:flex; flex-direction: row; justify-content: center; align-items: center;">
+    <div id="root" style="display: flex; flex-direction: column; justify-content: space-between; align-items: center;">
+        <div id="top-wrapper" style="align-items: flex-start;">
+            <div id="camera-select-wrapper" style="position: relative; height: 3vh; width: 3vh;">
+                <select id="camera-select" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></select>
+                <img style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="settings.svg"></img>
+            </div>
+        </div>
         <div id="preview-crop" style="display: flex; justify-content: center; align-items: center; overflow: hidden;">
             <video id="preview" autoplay playsinline></video>
         </div>
-        <select id="camera-select"></select>
-        <img id="shutter" style="cursor: pointer; height: 5vmax;" src="camera.png"></img>
+        <div id="bottom-wrapper" style="align-items: center;">
+            <div id="upload-wrapper" style="position: relative; height: 5vh; width: 5vh;">
+                <input id="upload" type="file" accept="image/*" multiple style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></input>
+                <img style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="upload.svg"></img>
+            </div>
+            <img id="shutter" style="cursor: pointer; height: 5vh;" src="camera.svg"></img>
+            <div id="done-wrapper" style="position: relative; height: 5vh; width: 5vh;">
+                <button id="done" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></button>
+                <img style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="done.svg"></img>
+            </div>
+        </div>
     </div>
     <script type="module" src="index.ts"></script>
 </body>

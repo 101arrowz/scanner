@@ -96,6 +96,7 @@ impl From<ImageData> for RGBAImage {
     }
 }
 
+// use js_sys::Array;
 // #[wasm_bindgen]
 // pub fn find_edges(data: ImageData, threshold: f32) -> Array {
 //     console_error_panic_hook::set_once();
