@@ -1,15 +1,24 @@
-import init, { find_document, extract_document, find_edges } from '../pkg';
+import { findDocument, extractDocument, Point } from './process';
 import { toPDF } from './pdf';
 import { getImage, download } from './io';
+import flashURL from 'url:./flash.svg';
+import flashOffURL from 'url:./flash-off.svg';
 import 'image-capture';
+
+const sharedCanvas = document.createElement('canvas');
+const sharedCtx = sharedCanvas.getContext('2d')!;
 
 const root = document.getElementById('root') as HTMLDivElement;
 const preview = document.getElementById('preview') as HTMLVideoElement;
 const previewCrop = document.getElementById('preview-crop') as HTMLDivElement;
+const previewDoc = document.getElementById('preview-doc') as HTMLDivElement;
 const bottomWrapper = document.getElementById('bottom-wrapper') as HTMLDivElement;
 const topWrapper = document.getElementById('top-wrapper') as HTMLDivElement;
 const selectWrapper = document.getElementById('camera-select-wrapper') as HTMLDivElement;
 const select = document.getElementById('camera-select') as HTMLSelectElement;
+const flashWrapper = document.getElementById('flash-wrapper') as HTMLDivElement;
+const flash = document.getElementById('flash') as HTMLButtonElement;
+const flashImg = document.getElementById('flash-img') as HTMLImageElement;
 const uploadWrapper = document.getElementById('upload-wrapper') as HTMLDivElement;
 const upload = document.getElementById('upload') as HTMLInputElement;
 const shutter = document.getElementById('shutter') as HTMLImageElement;
@@ -24,7 +33,6 @@ type MaxRes = {
 
 let defaultMaxRes: Promise<MaxRes>;
 let maxRes: Record<string, Promise<MaxRes> | undefined> = {};
-let wasmLoaded: Promise<void>;
 const pages: ImageData[] = [];
 
 
@@ -65,7 +73,14 @@ const getMaxRes = (device?: string) => {
   return prom;
 }
 
-const processImage = (img: ImageData) => {
+const bitmapToData = (bitmap: ImageBitmap) => {
+  sharedCanvas.height = bitmap.height;
+  sharedCanvas.width = bitmap.width;
+  sharedCtx.drawImage(bitmap, 0, 0);
+  return sharedCtx.getImageData(0, 0, sharedCanvas.width, sharedCanvas.height);
+}
+
+const processImage = async (img: ImageData) => {
   // const cnv = document.createElement('canvas');
   // cnv.width = img.width;
   // cnv.height = img.height;
@@ -89,8 +104,10 @@ const processImage = (img: ImageData) => {
   //   ctx.stroke();
   // }
   // document.body.appendChild(cnv);
-  const doc = extract_document(img, find_document(img)!, 1224);
-  pages.push(doc);
+  const doc = await findDocument(img);
+  if (doc) {
+    pages.push(await extractDocument(img, doc, 1224, true));
+  }
 }
 
 const startStream = async (device?: string) => {
@@ -112,8 +129,8 @@ const startStream = async (device?: string) => {
     topWrapper.style.flexDirection = bottomWrapper.style.flexDirection = 'column';
     topWrapper.style.height = bottomWrapper.style.height = window.innerHeight + 'px';
     topWrapper.style.width = bottomWrapper.style.width = '';
-    shutter.style.margin = doneWrapper.style.margin = uploadWrapper.style.margin = selectWrapper.style.margin = 0.02 * window.innerWidth + 'px';
-    selectWrapper.style.width = selectWrapper.style.height = 0.03 * window.innerWidth + 'px';
+    shutter.style.margin = doneWrapper.style.margin = uploadWrapper.style.margin = selectWrapper.style.margin = flashWrapper.style.margin = 0.02 * window.innerWidth + 'px';
+    flashWrapper.style.width = flashWrapper.style.height = selectWrapper.style.width = selectWrapper.style.height = 0.03 * window.innerWidth + 'px';
     doneWrapper.style.width = doneWrapper.style.height = uploadWrapper.style.width = uploadWrapper.style.height = 0.035 * window.innerWidth + 'px';
     shutter.style.height = 0.05 * window.innerWidth + 'px';
   } else {
@@ -123,35 +140,106 @@ const startStream = async (device?: string) => {
     topWrapper.style.flexDirection = bottomWrapper.style.flexDirection = 'row';
     topWrapper.style.height = bottomWrapper.style.height = '';
     topWrapper.style.width = bottomWrapper.style.width = window.innerWidth + 'px';
-    shutter.style.margin = doneWrapper.style.margin = uploadWrapper.style.margin = selectWrapper.style.margin = 0.02 * window.innerHeight + 'px';
-    selectWrapper.style.width = selectWrapper.style.height = 0.03 * window.innerHeight + 'px';
+    shutter.style.margin = doneWrapper.style.margin = uploadWrapper.style.margin = selectWrapper.style.margin = flashWrapper.style.margin = 0.02 * window.innerHeight + 'px';
+    flashWrapper.style.width = flashWrapper.style.height = selectWrapper.style.width = selectWrapper.style.height = 0.03 * window.innerHeight + 'px';
     doneWrapper.style.width = doneWrapper.style.height = uploadWrapper.style.width = uploadWrapper.style.height = shutter.style.height = 0.035 * window.innerHeight + 'px';
     shutter.style.height = 0.05 * window.innerHeight + 'px';
   }
   const constraints: MediaTrackConstraints = {
     width: maxRes.width, 
     height: maxRes.height,
-    facingMode: 'environment',
     deviceId: { exact: maxRes.deviceId }
   };
   const stream = await navigator.mediaDevices.getUserMedia({
     video: constraints
   });
   const videoTrack = stream.getVideoTracks()[0];
+  const capabilities = videoTrack.getCapabilities();
+  flashWrapper.style.display = capabilities.torch ? '' : 'none';
   preview.srcObject = stream;
-  const cap = new ImageCapture(videoTrack);
-  const onShutterClick = async () => {
-    await wasmLoaded;
-    const photo = await cap.takePhoto();
-    processImage(await getImage(photo));
+  let newElems: Node[] = [];
+  const clearNewElems = () => {
+    for (const elem of newElems) {
+      previewDoc.removeChild(elem);
+    };
+    newElems.length = 0;
   }
+  const onMetadata = () => {
+    const scale = landscape ? window.innerHeight / preview.videoHeight : window.innerWidth / preview.videoWidth;
+    const line = (a: Point, b: Point) => {
+      const elem = document.createElement('div');
+      elem.style.width = Math.hypot(a.x - b.x, a.y - b.y) * scale + 'px';
+      elem.style.height = '4px';
+      // elem.style.border = '1px solid black';
+      elem.style.backgroundColor = 'red';
+      elem.style.position = 'absolute';
+      elem.style.top = a.y * scale + 'px';
+      elem.style.left = a.x * scale + 'px';
+      elem.style.transformOrigin = 'top left';
+      elem.style.transform = `rotate(${Math.atan2(b.y - a.y, b.x - a.x)}rad)`;
+      return elem;
+    };
+    const docPreview = async () => {
+      let quad = await findDocument(bitmapToData(await cap.grabFrame()), true);
+      clearNewElems();
+      if (docPreviewTimeout != -1) {
+        if (quad) {
+          newElems = [
+            previewDoc.appendChild(line(quad.a, quad.b)),
+            previewDoc.appendChild(line(quad.b, quad.c)),
+            previewDoc.appendChild(line(quad.c, quad.d)),
+            previewDoc.appendChild(line(quad.d, quad.a))
+          ];
+        }
+        docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
+      }
+    };
+    docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
+  };
+  preview.addEventListener('loadedmetadata', onMetadata);
+  const cap = new ImageCapture(videoTrack);
+  let docPreviewTimeout = -1;
+  const shutterFlash = () => {
+    preview.style.opacity = '0';
+    setTimeout(() => preview.style.opacity = '', 50);
+  }
+  const onShutterClick = async () => {
+    shutterFlash();
+    let ts = performance.now();
+    const photo = await cap.takePhoto();
+    console.log(performance.now() - ts);
+    ts = performance.now();
+    const image = await getImage(photo);
+    console.log(performance.now() - ts);
+    processImage(image);
+  };
   shutter.addEventListener('click', onShutterClick);
+  let torch = false;
+  flashImg.src = flashOffURL;
+  const onFlashClick = async () => {
+    try {
+      torch = !torch;
+      await videoTrack.applyConstraints({
+        advanced: [{ torch }]
+      });
+      flashImg.src = torch
+        ? flashURL
+        : flashOffURL;
+    } catch (e) {
+
+    }
+  };
+  flash.addEventListener('click', onFlashClick);
   return {
     deviceId: maxRes.deviceId,
     close() {
+      clearTimeout(docPreviewTimeout);
+      clearNewElems();
+      docPreviewTimeout = -1;
       shutter.removeEventListener('click', onShutterClick);
+      flash.removeEventListener('click', onFlashClick);
+      preview.removeEventListener('loadedmetadata', onMetadata);
       preview.pause();
-      preview.srcObject = null;
       for (const track of stream.getTracks()) {
         track.stop();
       }
@@ -161,7 +249,6 @@ const startStream = async (device?: string) => {
 
 
 const onLoad = async () => {
-  wasmLoaded = init().then();
   let stream = await startStream(localStorage.getItem('defaultDevice')!);
   const updateBold = () => {
     for (const option of select.options) {
@@ -207,5 +294,5 @@ const onLoad = async () => {
 onLoad();
 
 if (process.env.NODE_ENV == 'production') {
-  navigator.serviceWorker?.register(new URL('sw.ts', import.meta.url), { type: 'module' });
+  navigator.serviceWorker?.register(new URL('./workers/service.ts', import.meta.url), { type: 'module' });
 }

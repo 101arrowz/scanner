@@ -4,8 +4,8 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "node",
-    "noEmit": true
+    "noEmit": true,
+    "lib": ["ESNext", "WebWorker"]
   },
-  "include": ["src"],
-  "exclude": ["src/workers"]
+  "include": ["."]
 }

@@ -2,20 +2,15 @@
 #![feature(int_abs_diff)]
 #[macro_use]
 extern crate alloc;
-extern crate wee_alloc;
 
 use wasm_bindgen::{prelude::*, Clamped};
 use web_sys::ImageData;
-use console_error_panic_hook;
 
 mod image;
 use image::{Quad, RGBAImage};
 
 #[cfg(not(target_arch = "wasm32"))]
 compile_error!("Only compilable to WASM");
-
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 fn sum_sides(quad: Quad) -> (f32, f32) {
     let Quad { a, b, c, d } = quad;
@@ -39,47 +34,41 @@ fn sort_quad(quad: Quad) -> Quad {
                     d: c,
                 }
             }
-        } else {
-            if c.y > d.y {
-                Quad {
-                    a: c,
-                    b: d,
-                    c: a,
-                    d: b,
-                }
-            } else {
-                Quad {
-                    a: d,
-                    b: c,
-                    c: b,
-                    d: a,
-                }
+        } else if c.y > d.y {
+            Quad {
+                a: c,
+                b: d,
+                c: a,
+                d: b,
             }
+        } else {
+            Quad {
+                a: d,
+                b: c,
+                c: b,
+                d: a,
+            }
+        }
+    } else if b.x + c.x < d.x + a.x {
+        if b.y > c.y {
+            Quad {
+                a: b,
+                b: c,
+                c: d,
+                d: a,
+            }
+        } else {
+            Quad { a: c, b, c: a, d }
+        }
+    } else if d.y > a.y {
+        Quad {
+            a: d,
+            b: a,
+            c: b,
+            d: c,
         }
     } else {
-        if b.x + c.x < d.x + a.x {
-            if b.y > c.y {
-                Quad {
-                    a: b,
-                    b: c,
-                    c: d,
-                    d: a,
-                }
-            } else {
-                Quad { a: c, b, c: a, d }
-            }
-        } else {
-            if d.y > a.y {
-                Quad {
-                    a: d,
-                    b: a,
-                    c: b,
-                    d: c,
-                }
-            } else {
-                Quad { a, b: d, c, d: b }
-            }
-        }
+        Quad { a, b: d, c, d: b }
     }
 }
 
@@ -112,8 +101,30 @@ impl From<ImageData> for RGBAImage {
 //     src.gaussian().edges(threshold).into_iter().map(JsValue::from).collect()
 // }
 
+#[macro_export]
+macro_rules! perf {
+    ($b:expr) => {{
+        use js_sys::{global, Reflect};
+        use wasm_bindgen::{prelude::*, JsCast};
+        use web_sys::Performance;
+
+        #[wasm_bindgen]
+        extern "C" {
+            #[wasm_bindgen(js_namespace = console)]
+            fn log(a: &str, b: &str, c: &str, d: f64);
+        }
+        let performance = Reflect::get(&global(), &JsValue::from_str("performance"))
+            .unwrap()
+            .unchecked_into::<Performance>();
+        let ts = performance.now();
+        let ret = $b;
+        log("time", stringify!($b), "=", performance.now() - ts);
+        ret
+    }};
+}
+
 #[wasm_bindgen]
-pub fn find_document(data: ImageData, tries: Option<usize>) -> Option<Quad> {
+pub fn find_document(data: ImageData) -> Option<Quad> {
     console_error_panic_hook::set_once();
     let rgba: RGBAImage = data.into();
     let mut by = (rgba.width.min(rgba.height) as f32) / 360.0;
@@ -124,8 +135,7 @@ pub fn find_document(data: ImageData, tries: Option<usize>) -> Option<Quad> {
     if by != 1.0 {
         src = src.downscale(by);
     }
-    let quads = src.gaussian().quads(tries.unwrap_or(3));
-    quads.get(0).map(|doc| {
+    src.gaussian().document().map(|doc| {
         let mut doc = sort_quad(doc.quad);
         doc.a.x *= by;
         doc.a.y *= by;

@@ -1,11 +1,13 @@
 use core::cmp::Ordering;
 
 use super::super::Image;
-use alloc::vec::Vec;
 use super::{
-    consts::{ANGS_PER_RAD, COS, GRADIENT_ERROR, HOUGH_MATCH_RATIO, MAX_ANG_ERROR, SIN},
+    consts::{
+        ANGS_PER_RAD, COS, GRADIENT_ERROR, GRADIENT_OFFSET, HOUGH_MATCH_RATIO, MAX_ANG_ERROR, SIN,
+    },
     Point, Quad, ScoredQuad,
 };
+use alloc::vec::Vec;
 
 pub struct GradientVotesResult {
     height: usize,
@@ -44,14 +46,14 @@ pub fn gradient_votes(source: &Image) -> GradientVotesResult {
         for j in 1..mw {
             let jfl = j as f32;
             let px = bi + j;
-            let nw = source[px - southeast];
-            let n = source[px - south];
-            let ne = source[px - southwest];
-            let w = source[px - east];
-            let e = source[px + east];
-            let sw = source[px + southwest];
-            let s = source[px + south];
-            let se = source[px + southeast];
+            let nw = unsafe { *source.get_unchecked(px - southeast) };
+            let n = unsafe { *source.get_unchecked(px - south) };
+            let ne = unsafe { *source.get_unchecked(px - southwest) };
+            let w = unsafe { *source.get_unchecked(px - east) };
+            let e = unsafe { *source.get_unchecked(px + east) };
+            let sw = unsafe { *source.get_unchecked(px + southwest) };
+            let s = unsafe { *source.get_unchecked(px + south) };
+            let se = unsafe { *source.get_unchecked(px + southeast) };
 
             let sx = 10.0 * (e - w) + 3.0 * (ne + se - nw - sw);
             let sy = 10.0 * (n - s) + 3.0 * (ne + nw - se - sw);
@@ -60,30 +62,42 @@ pub fn gradient_votes(source: &Image) -> GradientVotesResult {
             if !angle_rad.is_nan() {
                 let angle = (angle_rad * ANGS_PER_RAD + 128.0) as u8;
                 let ind = angle as usize;
-                let bin = (COS[ind] * ifl + SIN[ind] * jfl + diag) as usize >> 1;
+                let bin = (unsafe { *COS.get_unchecked(ind) } * ifl
+                    + unsafe { *SIN.get_unchecked(ind) } * jfl
+                    + diag) as usize
+                    >> 1;
                 let buf_ind = (bin << 8) | ind;
-                let val = buf[buf_ind] + grad / 3.0;
-                buf[buf_ind] = val;
+                let loc = unsafe { buf.get_unchecked_mut(buf_ind) };
+                let val = *loc + grad / GRADIENT_OFFSET;
+                *loc = val;
                 max_grad = max_grad.max(val);
                 for off in 1..=GRADIENT_ERROR {
-                    let local_grad = grad / (off as f32 * off as f32 + 3.0);
+                    let local_grad = grad / (off as f32 * off as f32 + GRADIENT_OFFSET);
                     let approx = angle.wrapping_add(off);
                     let ind = approx as usize;
-                    let bin = (COS[ind] * ifl + SIN[ind] * jfl + diag) as usize >> 1;
+                    let bin = (unsafe { *COS.get_unchecked(ind) } * ifl
+                        + unsafe { *SIN.get_unchecked(ind) } * jfl
+                        + diag) as usize
+                        >> 1;
                     let buf_ind = (bin << 8) | ind;
-                    let val = buf[buf_ind] + local_grad;
-                    buf[buf_ind] = val;
+                    let loc = unsafe { buf.get_unchecked_mut(buf_ind) };
+                    let val = *loc + local_grad;
+                    *loc = val;
 
                     let approx = angle.wrapping_sub(off);
                     let ind = approx as usize;
-                    let bin = (COS[ind] * ifl + SIN[ind] * jfl + diag) as usize >> 1;
+                    let bin = (unsafe { *COS.get_unchecked(ind) } * ifl
+                        + unsafe { *SIN.get_unchecked(ind) } * jfl
+                        + diag) as usize
+                        >> 1;
                     let buf_ind = (bin << 8) | ind;
-                    let val2 = buf[buf_ind] + local_grad;
-                    buf[buf_ind] = val2;
+                    let loc = unsafe { buf.get_unchecked_mut(buf_ind) };
+                    let val2 = *loc + local_grad;
+                    *loc = val2;
                     max_grad = max_grad.max(val2.max(val));
                 }
             }
-            grad_buf[px] = grad;
+            unsafe { *grad_buf.get_unchecked_mut(px) = grad };
             total_grad += grad;
         }
     }
@@ -133,7 +147,7 @@ impl Ord for Line {
 }
 
 pub fn edges(result: &GradientVotesResult, threshold: f32) -> Vec<Line> {
-    assert!(0.0 <= threshold && threshold < 1.0);
+    assert!((0.0..1.0).contains(&threshold));
     let &GradientVotesResult {
         diag,
         num_bins,
@@ -145,7 +159,7 @@ pub fn edges(result: &GradientVotesResult, threshold: f32) -> Vec<Line> {
     let mut lines = Vec::new();
     for bin in 0..num_bins {
         for angle in 0..256 {
-            let val = buf[(bin << 8) | angle];
+            let val = unsafe { *buf.get_unchecked((bin << 8) | angle) };
             if val > threshold_val {
                 lines.push(Line {
                     angle: angle as u8,
@@ -155,6 +169,7 @@ pub fn edges(result: &GradientVotesResult, threshold: f32) -> Vec<Line> {
             }
         }
     }
+    lines.truncate(5000);
     lines.sort_unstable_by(|a, b| b.cmp(a));
     let max_bin_err = (diag * HOUGH_MATCH_RATIO + 1.0) as usize;
     let mut i = 0;
@@ -207,11 +222,11 @@ pub fn documents(result: &GradientVotesResult, lines: &[Line]) -> Vec<ScoredQuad
     let intersection = |l1: Line, l2: Line| {
         let ang1 = l1.angle as usize;
         let ang2 = l2.angle as usize;
-        let a = SIN[ang1];
-        let b = COS[ang1];
+        let a = unsafe { *SIN.get_unchecked(ang1) };
+        let b = unsafe { *COS.get_unchecked(ang1) };
         let c = (l1.bin << 1) as f32 - diag;
-        let d = SIN[ang2];
-        let e = COS[ang2];
+        let d = unsafe { *SIN.get_unchecked(ang2) };
+        let e = unsafe { *COS.get_unchecked(ang2) };
         let f = (l2.bin << 1) as f32 - diag;
 
         let y = (a * f - d * c) / (a * e - d * b);
@@ -329,26 +344,24 @@ pub fn documents(result: &GradientVotesResult, lines: &[Line]) -> Vec<ScoredQuad
                             }
                         }
                     }
-                } else {
-                    if i13b && i23b {
-                        for &l4 in lines.iter().skip(k + 1) {
-                            let (i14, i14b) = intersection(l1, l4);
-                            let (i24, i24b) = intersection(l2, l4);
-                            let (_, i34b) = intersection(l3, l4);
-                            if i14b && i24b && !i34b {
-                                quads.push(scored_quad(
-                                    Quad {
-                                        a: i13,
-                                        b: i23,
-                                        c: i24,
-                                        d: i14,
-                                    },
-                                    l3,
-                                    l2,
-                                    l4,
-                                    l1,
-                                ));
-                            }
+                } else if i13b && i23b {
+                    for &l4 in lines.iter().skip(k + 1) {
+                        let (i14, i14b) = intersection(l1, l4);
+                        let (i24, i24b) = intersection(l2, l4);
+                        let (_, i34b) = intersection(l3, l4);
+                        if i14b && i24b && !i34b {
+                            quads.push(scored_quad(
+                                Quad {
+                                    a: i13,
+                                    b: i23,
+                                    c: i24,
+                                    d: i14,
+                                },
+                                l3,
+                                l2,
+                                l4,
+                                l1,
+                            ));
                         }
                     }
                 }

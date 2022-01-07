@@ -25,24 +25,12 @@ impl Image {
     //     edges.sort_unstable_by(|a, b| b.cmp(a));
     //     edges
     // }
-    pub fn quads(&self, mut tries: usize) -> Vec<ScoredQuad> {
+    pub fn document(&self) -> Option<ScoredQuad> {
         let result = document::gradient_votes(self);
-        let mut threshold = 0.01;
-        while tries > 0 {
-            tries -= 1;
-            let mut edges = document::edges(&result, threshold);
-            if edges.len() >= 20 {
-                tries = 0;
-                edges.truncate(20);
-            }
-            edges.sort_unstable_by(|a, b| b.cmp(a));
-            let documents = document::documents(&result, &edges);
-            if !documents.is_empty() {
-                return documents;
-            }
-            threshold *= 0.5;
-        }
-        Vec::new()
+        let mut edges = document::edges(&result, 0.05);
+        edges.truncate(20);
+        edges.sort_unstable_by(|a, b| b.cmp(a));
+        document::documents(&result, &edges).get(0).copied()
     }
 }
 

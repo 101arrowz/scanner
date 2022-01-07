@@ -1,7 +1,3 @@
-/// <reference no-default-lib="true" />
-/// <reference lib="esnext" />
-/// <reference lib="webworker" />
-
 import { manifest, version } from '@parcel/service-worker';
 
 declare const self: ServiceWorkerGlobalScope;
@@ -29,7 +25,7 @@ async function respond(req: Request) {
     cache.put(req, res.clone());
     return res;
   } catch (err) {
-    return cache.match(req);
+    return (await cache.match(req))!;
   }
 }
 

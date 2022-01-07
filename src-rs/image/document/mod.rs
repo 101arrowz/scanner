@@ -24,6 +24,19 @@ pub struct Quad {
     pub d: Point,
 }
 
+#[wasm_bindgen]
+impl Quad {
+    #[wasm_bindgen(constructor)]
+    pub fn new(ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32, dx: f32, dy: f32) -> Quad {
+        Quad {
+            a: Point { x: ax, y: ay },
+            b: Point { x: bx, y: by },
+            c: Point { x: cx, y: cy },
+            d: Point { x: dx, y: dy },
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct ScoredQuad {
     pub quad: Quad,
