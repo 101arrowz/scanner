@@ -125,6 +125,7 @@ macro_rules! perf {
 
 #[wasm_bindgen]
 pub fn find_document(data: ImageData) -> Option<Quad> {
+    #[cfg(debug_assertions)]
     console_error_panic_hook::set_once();
     let rgba: RGBAImage = data.into();
     let mut by = (rgba.width.min(rgba.height) as f32) / 360.0;
@@ -156,6 +157,8 @@ pub fn extract_document(
     target_width: usize,
     target_height: Option<usize>,
 ) -> ImageData {
+    #[cfg(debug_assertions)]
+    console_error_panic_hook::set_once();
     let rgba: RGBAImage = data.into();
     let target_height = if let Some(height) = target_height {
         height

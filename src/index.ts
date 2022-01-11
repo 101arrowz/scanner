@@ -16,6 +16,7 @@ const bottomWrapper = document.getElementById('bottom-wrapper') as HTMLDivElemen
 const topWrapper = document.getElementById('top-wrapper') as HTMLDivElement;
 const selectWrapper = document.getElementById('camera-select-wrapper') as HTMLDivElement;
 const select = document.getElementById('camera-select') as HTMLSelectElement;
+const githubWrapper = document.getElementById('github-wrapper') as HTMLDivElement;
 const flashWrapper = document.getElementById('flash-wrapper') as HTMLDivElement;
 const flash = document.getElementById('flash') as HTMLButtonElement;
 const flashImg = document.getElementById('flash-img') as HTMLImageElement;
@@ -110,6 +111,11 @@ const processImage = async (img: ImageData) => {
   }
 }
 
+const sideWrappers = [topWrapper, bottomWrapper];
+const topElems = [flashWrapper, githubWrapper, selectWrapper];
+const bottomElems = [doneWrapper, uploadWrapper];
+const allElems = topElems.concat(bottomElems, shutter);
+
 const startStream = async (device?: string) => {
   const maxRes = await getMaxRes(device);
   let aspectRatio = maxRes.width / maxRes.height;
@@ -122,28 +128,35 @@ const startStream = async (device?: string) => {
   previewCrop.style.height = previewCrop.style.minHeight = cssHeight;
   root.style.width = window.innerWidth + 'px';
   root.style.height = window.innerHeight + 'px';
+  for (const sideWrapper of sideWrappers) {
+    if (landscape) {
+      sideWrapper.style.flexDirection = sideWrapper == topWrapper ? 'column-reverse' : 'column';
+      sideWrapper.style.height = window.innerHeight + 'px';
+      sideWrapper.style.width = '';
+    } else {
+      sideWrapper.style.flexDirection = 'row';
+      sideWrapper.style.height = '';
+      sideWrapper.style.width = window.innerWidth + 'px';   
+    }
+  }
+  for (const topElem of topElems) {
+    topElem.style.width = topElem.style.height = (landscape ? window.innerWidth : window.innerHeight) * 0.03 + 'px';
+  }
+  for (const bottomElem of bottomElems) {
+    bottomElem.style.width = bottomElem.style.height = (landscape ? window.innerWidth : window.innerHeight) * 0.035 + 'px';
+  }
+  for (const elem of allElems) {
+    elem.style.margin = (landscape ? window.innerWidth : window.innerHeight) * 0.02 + 'px';
+  }
+  shutter.style.width = shutter.style.height = (landscape ? window.innerWidth : window.innerHeight) * 0.05 + 'px';
   if (landscape) {
     preview.style.height = cssHeight;
     preview.style.width = '';
     root.style.flexDirection = 'row';
-    topWrapper.style.flexDirection = bottomWrapper.style.flexDirection = 'column';
-    topWrapper.style.height = bottomWrapper.style.height = window.innerHeight + 'px';
-    topWrapper.style.width = bottomWrapper.style.width = '';
-    shutter.style.margin = doneWrapper.style.margin = uploadWrapper.style.margin = selectWrapper.style.margin = flashWrapper.style.margin = 0.02 * window.innerWidth + 'px';
-    flashWrapper.style.width = flashWrapper.style.height = selectWrapper.style.width = selectWrapper.style.height = 0.03 * window.innerWidth + 'px';
-    doneWrapper.style.width = doneWrapper.style.height = uploadWrapper.style.width = uploadWrapper.style.height = 0.035 * window.innerWidth + 'px';
-    shutter.style.height = 0.05 * window.innerWidth + 'px';
   } else {
     preview.style.height = '';
     preview.style.width = cssWidth;
     root.style.flexDirection = 'column';
-    topWrapper.style.flexDirection = bottomWrapper.style.flexDirection = 'row';
-    topWrapper.style.height = bottomWrapper.style.height = '';
-    topWrapper.style.width = bottomWrapper.style.width = window.innerWidth + 'px';
-    shutter.style.margin = doneWrapper.style.margin = uploadWrapper.style.margin = selectWrapper.style.margin = flashWrapper.style.margin = 0.02 * window.innerHeight + 'px';
-    flashWrapper.style.width = flashWrapper.style.height = selectWrapper.style.width = selectWrapper.style.height = 0.03 * window.innerHeight + 'px';
-    doneWrapper.style.width = doneWrapper.style.height = uploadWrapper.style.width = uploadWrapper.style.height = shutter.style.height = 0.035 * window.innerHeight + 'px';
-    shutter.style.height = 0.05 * window.innerHeight + 'px';
   }
   const constraints: MediaTrackConstraints = {
     width: maxRes.width, 
@@ -205,13 +218,8 @@ const startStream = async (device?: string) => {
   }
   const onShutterClick = async () => {
     shutterFlash();
-    let ts = performance.now();
-    const photo = await cap.takePhoto();
-    console.log(performance.now() - ts);
-    ts = performance.now();
-    const image = await getImage(photo);
-    console.log(performance.now() - ts);
-    processImage(image);
+    // processImage(bitmapToData(await cap.grabFrame()));
+    processImage(await getImage(await cap.takePhoto()));
   };
   shutter.addEventListener('click', onShutterClick);
   let torch = false;
