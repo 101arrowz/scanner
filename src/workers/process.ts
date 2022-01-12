@@ -22,6 +22,9 @@ export type Messages = {
     targetWidth: number;
     targetHeight?: number;
   }, ImageData];
+  'get-data': [{
+    bitmap: ImageBitmap;
+  }, ImageData];
 };
 
 export type Message = {
@@ -59,6 +62,13 @@ const handle = <T extends Message>(message: T): { result: Messages[T['type']][1]
     const { a, b, c, d } = message.region;
     const quad = new WasmQuad(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y);
     const result = extract_document(message.data, quad, message.targetWidth, message.targetHeight);
+    return { result, transfer: [result.data.buffer] };
+  } else if (message.type == 'get-data') {
+    const { width, height } = message.bitmap;
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(message.bitmap, 0, 0);
+    const result = ctx.getImageData(0, 0, width, height)
     return { result, transfer: [result.data.buffer] };
   } else {
     throw new TypeError('invalid message');

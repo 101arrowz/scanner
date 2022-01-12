@@ -1,3 +1,5 @@
+import { bitmapToData } from './process';
+
 export const toImage = async (img: Blob) => {
   const elem = document.createElement('img');
   const loaded = new Promise<void>((resolve, reject) => {
@@ -10,12 +12,16 @@ export const toImage = async (img: Blob) => {
   return elem;
 }
 
-export const getData = (img: HTMLImageElement) => {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d')!;
-  canvas.width = img.width, canvas.height = img.height;
-  ctx.drawImage(img, 0, 0);
-  return ctx.getImageData(0, 0, img.width, img.height);
+const sharedCanvas = document.createElement('canvas');
+const sharedCtx = sharedCanvas.getContext('2d')!
+
+export const getData = async (img: HTMLImageElement | ImageBitmap) => {
+  if (sharedCanvas['transferControlToOffscreen' as 'getContext']) {
+    return bitmapToData(img instanceof ImageBitmap ? img : await createImageBitmap(img));
+  }
+  sharedCanvas.width = img.width, sharedCanvas.height = img.height;
+  sharedCtx.drawImage(img, 0, 0);
+  return sharedCtx.getImageData(0, 0, img.width, img.height);
 }
 
 export const download = (file: Blob, name: string) => {

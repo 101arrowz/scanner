@@ -1,7 +1,7 @@
 import { findDocument, extractDocument, Point, Quad } from './process';
 import { toPDF } from './pdf';
 import { toImage, getData, download } from './io';
-import { ProspectivePage, getPages, setPages } from './db';
+import { ProspectivePage, getFile, setFile } from './db';
 import flashURL from 'url:./flash.svg';
 import flashOffURL from 'url:./flash-off.svg';
 import 'image-capture';
@@ -48,6 +48,7 @@ let maxRes: Record<string, Promise<MaxRes> | undefined> = {};
 type Page = {
   page: ProspectivePage;
   img: HTMLImageElement;
+  thumbnail: Blob;
 };
 
 const pages: Page[] = [];
@@ -110,58 +111,200 @@ const getMaxRes = (device?: string) => {
   return prom;
 }
 
-const bitmapToData = (bitmap: ImageBitmap) => {
-  sharedCanvas.height = bitmap.height;
-  sharedCanvas.width = bitmap.width;
-  sharedCtx.drawImage(bitmap, 0, 0);
-  return sharedCtx.getImageData(0, 0, sharedCanvas.width, sharedCanvas.height);
+const point = (a: Point, scale: number) => {
+  const elem = document.createElement('div');
+  const mwh = Math.min(window.innerWidth, window.innerHeight);
+  elem.style.width = mwh * 0.03 + 'px';
+  elem.style.height = mwh * 0.03 + 'px';
+  elem.style.borderRadius = mwh * 0.015 + 'px';
+  elem.style.backgroundColor = 'black';
+  elem.style.position = 'absolute';
+  adjustPoint(elem, a, scale);
+  return elem;
+};
+
+const adjustPoint = (elem: HTMLDivElement, a: Point, scale: number) => {
+  const mwh = Math.min(window.innerWidth, window.innerHeight);
+  elem.style.top = a.y * scale - mwh * 0.015 + 'px';
+  elem.style.left = a.x * scale - mwh * 0.015 + 'px';
+};
+
+const line = (a: Point, b: Point, scale: number) => {
+  const elem = document.createElement('div');
+  elem.style.height = '4px';
+  elem.style.backgroundColor = 'red';
+  elem.style.position = 'absolute';
+  elem.style.transformOrigin = 'center left';
+  adjustLine(elem, a, b, scale);
+  return elem;
+};
+
+const adjustLine = (elem: HTMLDivElement, a: Point, b: Point, scale: number) => {
+  elem.style.width = Math.hypot(a.x - b.x, a.y - b.y) * scale + 'px';
+  elem.style.top = a.y * scale + 'px';
+  elem.style.left = a.x * scale + 'px';
+  elem.style.transform = `rotate(${Math.atan2(b.y - a.y, b.x - a.x)}rad)`;
 }
 
 const processPhoto = async (blob: Blob) => {
   const img = await toImage(blob);
-  const data = getData(img);
+  const data = await getData(img);
   const quad = await findDocument(data) || {
     a: { x: 0, y: data.height },
     b: { x: 0, y: 0 },
     c: { x: data.width, y: 0 },
     d: { x: data.width, y: data.height }
   };
+  const clampPoint = (a: Point) => {
+    if (a.x < 0) a.x = 0;
+    else if (a.x > data.width) a.x = data.width;
+    if (a.y < 0) a.y = 0;
+    else if (a.y > data.height) a.y = data.height;
+  };
+  clampPoint(quad.a);
+  clampPoint(quad.b);
+  clampPoint(quad.c);
+  clampPoint(quad.d);
   const imgCrop = document.createElement('div');
   imgCrop.style.display = 'flex';
   imgCrop.style.justifyContent = 'center';
   imgCrop.style.alignItems = 'center';
   imgCrop.style.overflow = 'hidden';
-  imgCrop.appendChild(img);
+  const imgDoc = document.createElement('div');
+  imgDoc.style.position = 'relative';
+  imgDoc.appendChild(img);
+  imgCrop.appendChild(imgDoc);
   modal.style.display = 'flex';
-  const aspectRatio = data.width / data.height;
+  const aspectRatio = Math.max(data.width, data.height) / Math.min(data.width, data.height);
+  let scale = 0, docX = 0, docY = 0, landscape = false;
+  let prevElems: HTMLDivElement[] = [];
+  const makePoint = (src: Point, onUpdate: () => void) => {
+    const pt = point(src, scale);
+    let active = false;
+    const onDown = (evt: MouseEvent | TouchEvent, x: number, y: number) => {
+      if (evt.target == pt || (evt.target == img && Math.hypot(x - src.x * scale, y - src.y * scale) < Math.min(window.innerWidth, window.innerHeight) * 0.1)) {
+        evt.stopImmediatePropagation();
+        active = true;
+        onMove(x, y);
+      } else if (pt.parentElement != imgDoc) {
+        imgDoc.removeEventListener('mousedown', onMouseDown);
+        imgDoc.removeEventListener('touchstart', onTouchStart);
+        imgDoc.removeEventListener('mousemove', onMouseMove);
+        imgDoc.removeEventListener('touchmove', onTouchMove);
+        imgDoc.removeEventListener('mouseup', onUp);
+        imgDoc.removeEventListener('touchend', onUp);
+      }
+    };
+    const onMove = (x: number, y: number) => {
+      src.x = x / scale;
+      src.y = y / scale;
+      adjustPoint(pt, src, scale);
+      onUpdate();
+    };
+    const onUp = () => {
+      active = false;
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      onDown(e, e.clientX - docX, e.clientY - docY);
+    };
+    imgDoc.addEventListener('mousedown', onMouseDown);
+    const onTouchStart = (e: TouchEvent) => {
+      const touch = e.targetTouches[0];
+      onDown(e, touch.clientX - docX, touch.clientY - docY);
+    }
+    imgDoc.addEventListener('touchstart', onTouchStart);
+    const onMouseMove = (e: MouseEvent) => {
+      if (active) {
+        e.preventDefault();
+        onMove(e.clientX - docX, e.clientY - docY);
+      }
+    };
+    imgDoc.addEventListener('mousemove', onMouseMove);
+    const onTouchMove = (e: TouchEvent) => {
+      if (active) {
+        const touch = e.targetTouches[0];
+        e.preventDefault();
+        onMove(touch.clientX - docX, touch.clientY - docY);
+      }
+    }
+    imgDoc.addEventListener('touchmove', onTouchMove);
+    imgDoc.addEventListener('mouseup', onUp);
+    imgDoc.addEventListener('touchend', onUp);
+    return pt;
+  }
+  const paintLines = () => {
+    for (const elem of prevElems) {
+      imgDoc.removeChild(elem);
+    }
+    const ab = line(quad.a, quad.b, scale);
+    const bc = line(quad.b, quad.c, scale);
+    const cd = line(quad.c, quad.d, scale);
+    const da = line(quad.d, quad.a, scale);
+    prevElems = [
+      imgDoc.appendChild(ab),
+      imgDoc.appendChild(bc),
+      imgDoc.appendChild(cd),
+      imgDoc.appendChild(da),
+      imgDoc.appendChild(makePoint(quad.a, () => {
+        adjustLine(da, quad.d, quad.a, scale);
+        adjustLine(ab, quad.a, quad.b, scale);
+      })),
+      imgDoc.appendChild(makePoint(quad.b, () => {
+        adjustLine(ab, quad.a, quad.b, scale);
+        adjustLine(bc, quad.b, quad.c, scale);
+      })),
+      imgDoc.appendChild(makePoint(quad.c, () => {
+        adjustLine(bc, quad.b, quad.c, scale);
+        adjustLine(cd, quad.c, quad.d, scale);
+      })),
+      imgDoc.appendChild(makePoint(quad.d, () => {
+        adjustLine(cd, quad.c, quad.d, scale);
+        adjustLine(da, quad.d, quad.a, scale);
+      })),
+    ];
+  };
   const updateImageDimensions = () => {
     const { width, height } = calcDimensions(aspectRatio, 0.925);
     const cssWidth = width + 'px';
     const cssHeight = height + 'px';
-    if (isLandscape(aspectRatio)) {
+    landscape = isLandscape(aspectRatio);
+    if (landscape) {
       img.style.width = '';
       img.style.height = cssHeight;
+      scale = window.innerHeight / data.height;
     } else {
       img.style.width = cssWidth;
       img.style.height = '';
+      scale = window.innerWidth / data.width;
     }
     imgCrop.style.width = imgCrop.style.minWidth = cssWidth;
     imgCrop.style.height = imgCrop.style.minHeight = cssHeight;
+    queueMicrotask(() => {
+      const { left, top } = imgDoc.getBoundingClientRect();
+      docX = left;
+      docY = top;
+      paintLines();
+    });
   };
   updateImageDimensions();
   captures.appendChild(imgCrop);
   const offResize = onResize(updateImageDimensions);
   return new Promise<void>(resolve => {
     const onDone = () => {
+      pages.push({ page: { data, quad }, img, thumbnail: blob });
       finish();
     };
+    const onCancel = () => {
+      finish();
+    };
+    modalCancel.addEventListener('click', onCancel);
     modalDone.addEventListener('click', onDone);
     const finish = () => {
       modalDone.removeEventListener('click', onDone);
+      modalCancel.removeEventListener('click', onCancel);
       modal.style.display = 'none';
       captures.removeChild(imgCrop);
       offResize();
-      pages.push({ page: { data, quad }, img });
       resolve();
     };
   });
@@ -243,28 +386,16 @@ const startStream = async (device?: string) => {
   }
   const onMetadata = () => {
     const scale = landscape ? window.innerHeight / preview.videoHeight : window.innerWidth / preview.videoWidth;
-    const line = (a: Point, b: Point) => {
-      const elem = document.createElement('div');
-      elem.style.width = Math.hypot(a.x - b.x, a.y - b.y) * scale + 'px';
-      elem.style.height = '4px';
-      elem.style.backgroundColor = 'red';
-      elem.style.position = 'absolute';
-      elem.style.top = a.y * scale + 'px';
-      elem.style.left = a.x * scale + 'px';
-      elem.style.transformOrigin = 'top left';
-      elem.style.transform = `rotate(${Math.atan2(b.y - a.y, b.x - a.x)}rad)`;
-      return elem;
-    };
     const docPreview = async () => {
-      let quad = await findDocument(bitmapToData(await cap.grabFrame()), true);
+      let quad = await findDocument(await getData(await cap.grabFrame()), true);
       clearNewElems();
       if (docPreviewTimeout != -1) {
         if (quad) {
           newElems = [
-            previewDoc.appendChild(line(quad.a, quad.b)),
-            previewDoc.appendChild(line(quad.b, quad.c)),
-            previewDoc.appendChild(line(quad.c, quad.d)),
-            previewDoc.appendChild(line(quad.d, quad.a))
+            previewDoc.appendChild(line(quad.a, quad.b, scale)),
+            previewDoc.appendChild(line(quad.b, quad.c, scale)),
+            previewDoc.appendChild(line(quad.c, quad.d, scale)),
+            previewDoc.appendChild(line(quad.d, quad.a, scale))
           ];
         }
         docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
