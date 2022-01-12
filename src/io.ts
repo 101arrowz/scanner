@@ -1,4 +1,4 @@
-export const getImage = async (img: Blob) => {
+export const toImage = async (img: Blob) => {
   const elem = document.createElement('img');
   const loaded = new Promise<void>((resolve, reject) => {
     elem.onload = () => { resolve(); };
@@ -7,11 +7,15 @@ export const getImage = async (img: Blob) => {
   elem.src = URL.createObjectURL(img);
   await loaded;
   URL.revokeObjectURL(elem.src);
+  return elem;
+}
+
+export const getData = (img: HTMLImageElement) => {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
-  canvas.width = elem.width, canvas.height = elem.height;
-  ctx.drawImage(elem, 0, 0);
-  return ctx.getImageData(0, 0, elem.width, elem.height);
+  canvas.width = img.width, canvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
+  return ctx.getImageData(0, 0, img.width, img.height);
 }
 
 export const download = (file: Blob, name: string) => {

@@ -1,6 +1,7 @@
-import { findDocument, extractDocument, Point } from './process';
+import { findDocument, extractDocument, Point, Quad } from './process';
 import { toPDF } from './pdf';
-import { getImage, download } from './io';
+import { toImage, getData, download } from './io';
+import { ProspectivePage, getPages, setPages } from './db';
 import flashURL from 'url:./flash.svg';
 import flashOffURL from 'url:./flash-off.svg';
 import 'image-capture';
@@ -9,6 +10,7 @@ const sharedCanvas = document.createElement('canvas');
 const sharedCtx = sharedCanvas.getContext('2d')!;
 
 const root = document.getElementById('root') as HTMLDivElement;
+const modal = document.getElementById('modal') as HTMLDivElement;
 const preview = document.getElementById('preview') as HTMLVideoElement;
 const previewCrop = document.getElementById('preview-crop') as HTMLDivElement;
 const previewDoc = document.getElementById('preview-doc') as HTMLDivElement;
@@ -26,22 +28,51 @@ const shutter = document.getElementById('shutter') as HTMLImageElement;
 const doneWrapper = document.getElementById('done-wrapper') as HTMLDivElement;
 const done = document.getElementById('done') as HTMLButtonElement;
 
-type MaxRes = {
+type Dimensions = {
   width: number;
   height: number;
+};
+
+type MaxRes = Dimensions & {
   deviceId: string;
 };
 
 let defaultMaxRes: Promise<MaxRes>;
 let maxRes: Record<string, Promise<MaxRes> | undefined> = {};
-const pages: ImageData[] = [];
 
+type Page = {
+  page: ProspectivePage;
+  img: HTMLImageElement;
+};
+
+const pages: Page[] = [];
 
 const log = (text: string) => {
   const el = document.createElement('div');
   el.innerText = text;
   root.appendChild(el);
 }
+
+const resizeListeners: (() => void)[] = [];
+
+const onResize = (listener: () => void) => {
+  resizeListeners.push(listener);
+  return () => {
+    resizeListeners.splice(resizeListeners.indexOf(listener), 1);
+  };
+};
+
+const callResizeListeners = () => {
+  for (const listener of resizeListeners) {
+    listener();
+  }
+};
+
+let rst = -1;
+window.addEventListener('resize', () => {
+  clearTimeout(rst);
+  rst = setTimeout(callResizeListeners, 250) as unknown as number;
+}, { passive: true });
 
 const getMaxRes = (device?: string) => {
   const constraints: MediaTrackConstraints = {
@@ -81,34 +112,38 @@ const bitmapToData = (bitmap: ImageBitmap) => {
   return sharedCtx.getImageData(0, 0, sharedCanvas.width, sharedCanvas.height);
 }
 
-const processImage = async (img: ImageData) => {
-  // const cnv = document.createElement('canvas');
-  // cnv.width = img.width;
-  // cnv.height = img.height;
-  // const ctx = cnv.getContext('2d')!;
-  // const diag = Math.hypot(img.width, img.height);
-  // let by = Math.min(img.width, img.height) / 360;
-  // if (by < 2) by = 1;
-  // ctx.putImageData(img, 0, 0);
-  // const edges = find_edges(img, 0.05);
-  // for (const { bin: b, angle: a, score } of edges) {
-  //   const bin = Math.round(b) * by, angle = a * Math.PI / 256;
-  //   ctx.strokeStyle = `rgba(255, 0, 0, ${score / edges[0].score})`;
-  //   ctx.lineWidth = 5;
-  //   const c = Math.cos(angle);
-  //   const s = Math.sin(angle);
-  //   const rho = ((bin << 1) - diag);
-  //   const x = s * rho, y = c * rho;
-  //   ctx.beginPath();
-  //   ctx.moveTo(x + c * 10000, y - s * 10000);
-  //   ctx.lineTo(x - c * 10000, y + s * 10000);
-  //   ctx.stroke();
-  // }
-  // document.body.appendChild(cnv);
-  const doc = await findDocument(img);
-  if (doc) {
-    pages.push(await extractDocument(img, doc, 1224, true));
-  }
+const processPhoto = async (blob: Blob) => {
+  const img = await toImage(blob);
+  const data = getData(img);
+  const quad = await findDocument(data) || {
+    a: { x: 0, y: data.height },
+    b: { x: 0, y: 0 },
+    c: { x: data.width, y: 0 },
+    d: { x: data.width, y: data.height }
+  };
+  modal.style.display = 'flex';
+  const aspectRatio = data.width / data.height;
+  const updateImageDimensions = () => {
+    const { width, height } = calcDimensions(aspectRatio, 0.93);
+    img.style.width = width + 'px';
+    img.style.height = height + 'px';
+  };
+  updateImageDimensions();
+  const offResize = onResize(updateImageDimensions);
+
+
+  modal.style.display = 'none';
+  offResize();
+  pages.push({ page: { data, quad }, img });
+}
+
+const isLandscape = (aspectRatio: number) => window.innerWidth > (window.innerHeight * aspectRatio);
+
+const calcDimensions = (aspectRatio: number, maxRatio: number) => {
+  const landscape = isLandscape(aspectRatio);
+  const height = landscape ? window.innerHeight : Math.floor(Math.min(window.innerWidth * aspectRatio, window.innerHeight * maxRatio));
+  const width = landscape ? Math.floor(Math.min(window.innerHeight * aspectRatio, window.innerWidth * maxRatio)) : window.innerWidth;
+  return { width, height };
 }
 
 const sideWrappers = [topWrapper, bottomWrapper];
@@ -119,15 +154,14 @@ const allElems = topElems.concat(bottomElems, shutter);
 const startStream = async (device?: string) => {
   const maxRes = await getMaxRes(device);
   let aspectRatio = maxRes.width / maxRes.height;
-  const landscape = window.innerWidth > (window.innerHeight * aspectRatio);
-  const height = landscape ? window.innerHeight : Math.floor(Math.min(window.innerWidth * aspectRatio, window.innerHeight * 0.84));
-  const width = landscape ? Math.floor(Math.min(window.innerHeight * aspectRatio, window.innerWidth * 0.84)) : window.innerWidth;
+  const landscape = isLandscape(aspectRatio);
+  const { width, height } = calcDimensions(aspectRatio, 0.84);
   const cssHeight = height + 'px';
   const cssWidth = width + 'px';
   previewCrop.style.width = previewCrop.style.minWidth = cssWidth;
   previewCrop.style.height = previewCrop.style.minHeight = cssHeight;
-  root.style.width = window.innerWidth + 'px';
-  root.style.height = window.innerHeight + 'px';
+  modal.style.width = root.style.width = window.innerWidth + 'px';
+  modal.style.height = root.style.height = window.innerHeight + 'px';
   for (const sideWrapper of sideWrappers) {
     if (landscape) {
       sideWrapper.style.flexDirection = sideWrapper == topWrapper ? 'column-reverse' : 'column';
@@ -152,11 +186,11 @@ const startStream = async (device?: string) => {
   if (landscape) {
     preview.style.height = cssHeight;
     preview.style.width = '';
-    root.style.flexDirection = 'row';
+    modal.style.flexDirection = root.style.flexDirection = 'row';
   } else {
     preview.style.height = '';
     preview.style.width = cssWidth;
-    root.style.flexDirection = 'column';
+    modal.style.flexDirection = root.style.flexDirection = 'column';
   }
   const constraints: MediaTrackConstraints = {
     width: maxRes.width, 
@@ -183,7 +217,6 @@ const startStream = async (device?: string) => {
       const elem = document.createElement('div');
       elem.style.width = Math.hypot(a.x - b.x, a.y - b.y) * scale + 'px';
       elem.style.height = '4px';
-      // elem.style.border = '1px solid black';
       elem.style.backgroundColor = 'red';
       elem.style.position = 'absolute';
       elem.style.top = a.y * scale + 'px';
@@ -217,9 +250,9 @@ const startStream = async (device?: string) => {
     setTimeout(() => preview.style.opacity = '', 50);
   }
   const onShutterClick = async () => {
+    const photo = await cap.takePhoto();
     shutterFlash();
-    // processImage(bitmapToData(await cap.grabFrame()));
-    processImage(await getImage(await cap.takePhoto()));
+    await processPhoto(photo);
   };
   shutter.addEventListener('click', onShutterClick);
   let torch = false;
@@ -274,7 +307,7 @@ const onLoad = async () => {
   }
   select.value = stream.deviceId;
   updateBold();
-  const onUpdate = async () => {
+  const update = async () => {
     updateBold();
     stream.close();
     select.disabled = true;
@@ -282,19 +315,15 @@ const onLoad = async () => {
     stream = await startStream(select.value);
     select.disabled = false;
   };
-  select.onchange = onUpdate;
-  let rst = -1;
-  window.onresize = () => {
-    clearTimeout(rst);
-    rst = setTimeout(onUpdate, 250) as unknown as number;
-  };
+  select.onchange = update;
+  onResize(update);
   upload.onchange = async () => {
     for (const file of upload.files!) {
-      processImage(await getImage(file));
+      await processPhoto(file);
     }
   };
   done.onclick = async () => {
-    download(new Blob([await toPDF(pages)]), 'out.pdf')
+    download(new Blob([await toPDF(await Promise.all(pages.map(({ page }) => extractDocument(page.data, page.quad, 1224, true))))]), 'out.pdf')
     pages.length = 0;
   }
 }
@@ -302,5 +331,5 @@ const onLoad = async () => {
 onLoad();
 
 if (process.env.NODE_ENV == 'production') {
-  navigator.serviceWorker?.register(new URL('./workers/service.ts', import.meta.url), { type: 'module' });
+  navigator.serviceWorker.register(new URL('./workers/service.ts', import.meta.url), { type: 'module' });
 }

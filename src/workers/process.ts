@@ -32,10 +32,9 @@ export type Message = {
 
 const handle = <T extends Message>(message: T): { result: Messages[T['type']][1]; transfer?: Transferable[] } => {
   if (message.type == 'find-document') {
-    const ts = performance.now();
+    // const ts = performance.now();
     const quad = find_document(message.data);
-    console.log('find_document:', (performance.now() - ts) + 'ms')
-    
+    // console.log('find_document:', (performance.now() - ts) + 'ms')
     return {
       result: quad && {
         a: {
