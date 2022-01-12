@@ -11,6 +11,7 @@ const sharedCtx = sharedCanvas.getContext('2d')!;
 
 const root = document.getElementById('root') as HTMLDivElement;
 const modal = document.getElementById('modal') as HTMLDivElement;
+const captures = document.getElementById('captures') as HTMLDivElement;
 const preview = document.getElementById('preview') as HTMLVideoElement;
 const previewCrop = document.getElementById('preview-crop') as HTMLDivElement;
 const previewDoc = document.getElementById('preview-doc') as HTMLDivElement;
@@ -27,7 +28,11 @@ const upload = document.getElementById('upload') as HTMLInputElement;
 const shutter = document.getElementById('shutter') as HTMLImageElement;
 const doneWrapper = document.getElementById('done-wrapper') as HTMLDivElement;
 const done = document.getElementById('done') as HTMLButtonElement;
-
+const modalBottomWrapper = document.getElementById('modal-bottom-wrapper') as HTMLDivElement;
+const modalCancelWrapper = document.getElementById('modal-cancel-wrapper') as HTMLDivElement;
+const modalCancel = document.getElementById('modal-cancel') as HTMLButtonElement;
+const modalDoneWrapper = document.getElementById('modal-done-wrapper') as HTMLDivElement;
+const modalDone = document.getElementById('modal-done') as HTMLButtonElement;
 type Dimensions = {
   width: number;
   height: number;
@@ -121,20 +126,45 @@ const processPhoto = async (blob: Blob) => {
     c: { x: data.width, y: 0 },
     d: { x: data.width, y: data.height }
   };
+  const imgCrop = document.createElement('div');
+  imgCrop.style.display = 'flex';
+  imgCrop.style.justifyContent = 'center';
+  imgCrop.style.alignItems = 'center';
+  imgCrop.style.overflow = 'hidden';
+  imgCrop.appendChild(img);
   modal.style.display = 'flex';
   const aspectRatio = data.width / data.height;
   const updateImageDimensions = () => {
-    const { width, height } = calcDimensions(aspectRatio, 0.93);
-    img.style.width = width + 'px';
-    img.style.height = height + 'px';
+    const { width, height } = calcDimensions(aspectRatio, 0.925);
+    const cssWidth = width + 'px';
+    const cssHeight = height + 'px';
+    if (isLandscape(aspectRatio)) {
+      img.style.width = '';
+      img.style.height = cssHeight;
+    } else {
+      img.style.width = cssWidth;
+      img.style.height = '';
+    }
+    imgCrop.style.width = imgCrop.style.minWidth = cssWidth;
+    imgCrop.style.height = imgCrop.style.minHeight = cssHeight;
   };
   updateImageDimensions();
+  captures.appendChild(imgCrop);
   const offResize = onResize(updateImageDimensions);
-
-
-  modal.style.display = 'none';
-  offResize();
-  pages.push({ page: { data, quad }, img });
+  return new Promise<void>(resolve => {
+    const onDone = () => {
+      finish();
+    };
+    modalDone.addEventListener('click', onDone);
+    const finish = () => {
+      modalDone.removeEventListener('click', onDone);
+      modal.style.display = 'none';
+      captures.removeChild(imgCrop);
+      offResize();
+      pages.push({ page: { data, quad }, img });
+      resolve();
+    };
+  });
 }
 
 const isLandscape = (aspectRatio: number) => window.innerWidth > (window.innerHeight * aspectRatio);
@@ -146,9 +176,9 @@ const calcDimensions = (aspectRatio: number, maxRatio: number) => {
   return { width, height };
 }
 
-const sideWrappers = [topWrapper, bottomWrapper];
+const sideWrappers = [topWrapper, bottomWrapper, modalBottomWrapper];
 const topElems = [flashWrapper, githubWrapper, selectWrapper];
-const bottomElems = [doneWrapper, uploadWrapper];
+const bottomElems = [doneWrapper, uploadWrapper, modalCancelWrapper, modalDoneWrapper];
 const allElems = topElems.concat(bottomElems, shutter);
 
 const startStream = async (device?: string) => {
