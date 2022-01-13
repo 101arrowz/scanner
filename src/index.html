@@ -23,7 +23,11 @@
         <div id="top-wrapper" style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; width: 100vw;">
             <div id="camera-select-wrapper" style="position: relative; height: 3vh; width: 3vh;">
                 <select id="camera-select" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></select>
-                <img style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="settings.svg"></img>
+                <img style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="camera-switch.svg"></img>
+            </div>
+            <div id="quality-wrapper" style="position: relative; height: 3vh; width: 3vh; display: none;">
+                <button id="quality" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></button>
+                <img id="quality-img" style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="hd.svg"></img>
             </div>
             <div id="github-wrapper" style="position: relative; height: 3vh; width: 3vh;">
                 <a href="https://github.com/101arrowz/scanner" target="_blank" rel="noopener noreferrer" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></a>

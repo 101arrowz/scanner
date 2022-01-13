@@ -15,9 +15,9 @@ export const toImage = async (img: Blob) => {
 const sharedCanvas = document.createElement('canvas');
 const sharedCtx = sharedCanvas.getContext('2d')!
 
-export const getData = async (img: HTMLImageElement | ImageBitmap) => {
+export const getData = async (img: ImageBitmap | HTMLImageElement, transfer?: boolean) => {
   if (sharedCanvas['transferControlToOffscreen' as 'getContext']) {
-    return bitmapToData(img instanceof ImageBitmap ? img : await createImageBitmap(img));
+    return bitmapToData(img instanceof ImageBitmap ? img : await createImageBitmap(img), transfer);
   }
   sharedCanvas.width = img.width, sharedCanvas.height = img.height;
   sharedCtx.drawImage(img, 0, 0);

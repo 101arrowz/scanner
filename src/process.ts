@@ -57,11 +57,11 @@ export function extractDocument(data: ImageData, region: Quad, targetWidth: numb
   }, transfer ? [data.data.buffer] : []);
 }
 
-export function bitmapToData(bitmap: ImageBitmap) {
+export function bitmapToData(bitmap: ImageBitmap, transfer?: boolean) {
   return message({
     type: 'get-data',
     bitmap
-  }, [bitmap]);
+  }, transfer ? [bitmap] : []);
 }
 
 export { Quad, Point }

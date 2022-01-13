@@ -4,10 +4,9 @@ import { toImage, getData, download } from './io';
 import { ProspectivePage, getFile, setFile } from './db';
 import flashURL from 'url:./flash.svg';
 import flashOffURL from 'url:./flash-off.svg';
+import hdURL from 'url:./hd.svg';
+import sdURL from 'url:./sd.svg';
 import 'image-capture';
-
-const sharedCanvas = document.createElement('canvas');
-const sharedCtx = sharedCanvas.getContext('2d')!;
 
 const root = document.getElementById('root') as HTMLDivElement;
 const modal = document.getElementById('modal') as HTMLDivElement;
@@ -19,6 +18,9 @@ const bottomWrapper = document.getElementById('bottom-wrapper') as HTMLDivElemen
 const topWrapper = document.getElementById('top-wrapper') as HTMLDivElement;
 const selectWrapper = document.getElementById('camera-select-wrapper') as HTMLDivElement;
 const select = document.getElementById('camera-select') as HTMLSelectElement;
+const qualityWrapper = document.getElementById('quality-wrapper') as HTMLDivElement;
+const quality = document.getElementById('quality') as HTMLButtonElement;
+const qualityImg = document.getElementById('quality-img') as HTMLImageElement;
 const githubWrapper = document.getElementById('github-wrapper') as HTMLDivElement;
 const flashWrapper = document.getElementById('flash-wrapper') as HTMLDivElement;
 const flash = document.getElementById('flash') as HTMLButtonElement;
@@ -47,8 +49,8 @@ let maxRes: Record<string, Promise<MaxRes> | undefined> = {};
 
 type Page = {
   page: ProspectivePage;
-  img: HTMLImageElement;
-  thumbnail: Blob;
+  // img: HTMLImageElement;
+  // thumbnail: Blob;
 };
 
 const pages: Page[] = [];
@@ -146,9 +148,20 @@ const adjustLine = (elem: HTMLDivElement, a: Point, b: Point, scale: number) => 
   elem.style.transform = `rotate(${Math.atan2(b.y - a.y, b.x - a.x)}rad)`;
 }
 
-const processPhoto = async (blob: Blob) => {
-  const img = await toImage(blob);
-  const data = await getData(img);
+const processPhoto = async (src: Blob | ImageBitmap) => {
+  let img: HTMLElement, data: ImageData;
+  if (src instanceof Blob) {
+    const image = await toImage(src);
+    img = image;
+    data = await getData(image);
+  } else {
+    const cnv = document.createElement('canvas');
+    cnv.width = src.width;
+    cnv.height = src.height;
+    cnv.getContext('2d')!.drawImage(src, 0, 0);
+    img = cnv;
+    data = await getData(src, true);
+  }
   const quad = await findDocument(data) || {
     a: { x: 0, y: data.height },
     b: { x: 0, y: 0 },
@@ -182,7 +195,7 @@ const processPhoto = async (blob: Blob) => {
     const pt = point(src, scale);
     let active = false;
     const onDown = (evt: MouseEvent | TouchEvent, x: number, y: number) => {
-      if (evt.target == pt || (evt.target == img && Math.hypot(x - src.x * scale, y - src.y * scale) < Math.min(window.innerWidth, window.innerHeight) * 0.1)) {
+      if (evt.target == pt || (evt.target == img && Math.hypot(x - src.x * scale, y - src.y * scale) < Math.min(window.innerWidth, window.innerHeight) * 0.2)) {
         evt.stopImmediatePropagation();
         active = true;
         onMove(x, y);
@@ -289,9 +302,10 @@ const processPhoto = async (blob: Blob) => {
   updateImageDimensions();
   captures.appendChild(imgCrop);
   const offResize = onResize(updateImageDimensions);
+
   return new Promise<void>(resolve => {
     const onDone = () => {
-      pages.push({ page: { data, quad }, img, thumbnail: blob });
+      pages.push({ page: { data, quad } });
       finish();
     };
     const onCancel = () => {
@@ -320,7 +334,7 @@ const calcDimensions = (aspectRatio: number, maxRatio: number) => {
 }
 
 const sideWrappers = [topWrapper, bottomWrapper, modalBottomWrapper];
-const topElems = [flashWrapper, githubWrapper, selectWrapper];
+const topElems = [flashWrapper, qualityWrapper, githubWrapper, selectWrapper];
 const bottomElems = [doneWrapper, uploadWrapper, modalCancelWrapper, modalDoneWrapper];
 const allElems = topElems.concat(bottomElems, shutter);
 
@@ -384,6 +398,7 @@ const startStream = async (device?: string) => {
     };
     newElems.length = 0;
   }
+  let resume = () => {};
   const onMetadata = () => {
     const scale = landscape ? window.innerHeight / preview.videoHeight : window.innerWidth / preview.videoWidth;
     const docPreview = async () => {
@@ -401,19 +416,45 @@ const startStream = async (device?: string) => {
         docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
       }
     };
-    docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
+    resume = () => {
+      docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
+    };
+    resume();
+  };
+  const pause = () => {
+    clearTimeout(docPreviewTimeout);
+    docPreviewTimeout = -1;
   };
   preview.addEventListener('loadedmetadata', onMetadata);
   const cap = new ImageCapture(videoTrack);
+  let hd = Object.prototype.toString.call(cap) == '[object ImageCapture]';
+  qualityWrapper.style.display = hd ? '' : 'none';
+  qualityImg.src = hdURL;
+  const onQualityClick = () => {
+    hd = !hd;
+    qualityImg.src = hd ? hdURL : sdURL;
+  };
+  quality.addEventListener('click', onQualityClick);
   let docPreviewTimeout = -1;
   const shutterFlash = () => {
     preview.style.opacity = '0';
     setTimeout(() => preview.style.opacity = '', 50);
-  }
+  };
+  let processing = false;
   const onShutterClick = async () => {
-    const photo = await cap.takePhoto();
-    shutterFlash();
-    await processPhoto(photo);
+    if (!processing) {
+      shutter.style.opacity = '0.5';
+      processing = true;
+      shutterFlash();
+      try {
+        const photo = hd ? await cap.takePhoto() : await cap.grabFrame();
+        pause();
+        await processPhoto(photo);
+        resume();
+      } catch (e) {}
+      processing = false;
+      shutter.style.opacity = '1';
+    }
   };
   shutter.addEventListener('click', onShutterClick);
   let torch = false;
@@ -424,22 +465,17 @@ const startStream = async (device?: string) => {
       await videoTrack.applyConstraints({
         advanced: [{ torch }]
       });
-      flashImg.src = torch
-        ? flashURL
-        : flashOffURL;
-    } catch (e) {
-
-    }
+      flashImg.src = torch ? flashURL : flashOffURL;
+    } catch (e) {}
   };
   flash.addEventListener('click', onFlashClick);
   return {
     deviceId: maxRes.deviceId,
     close() {
-      clearTimeout(docPreviewTimeout);
-      clearNewElems();
-      docPreviewTimeout = -1;
+      pause();
       shutter.removeEventListener('click', onShutterClick);
       flash.removeEventListener('click', onFlashClick);
+      quality.removeEventListener('click', onQualityClick);
       preview.removeEventListener('loadedmetadata', onMetadata);
       preview.pause();
       for (const track of stream.getTracks()) {
