@@ -25,6 +25,8 @@ const githubWrapper = document.getElementById('github-wrapper') as HTMLDivElemen
 const flashWrapper = document.getElementById('flash-wrapper') as HTMLDivElement;
 const flash = document.getElementById('flash') as HTMLButtonElement;
 const flashImg = document.getElementById('flash-img') as HTMLImageElement;
+const pastWrapper = document.getElementById('past-wrapper') as HTMLDivElement;
+const past = document.getElementById('past') as HTMLDivElement;
 const uploadWrapper = document.getElementById('upload-wrapper') as HTMLDivElement;
 const upload = document.getElementById('upload') as HTMLInputElement;
 const shutter = document.getElementById('shutter') as HTMLImageElement;
@@ -47,10 +49,8 @@ type MaxRes = Dimensions & {
 let defaultMaxRes: Promise<MaxRes>;
 let maxRes: Record<string, Promise<MaxRes> | undefined> = {};
 
-type Page = {
-  page: ProspectivePage;
-  // img: HTMLImageElement;
-  // thumbnail: Blob;
+type Page = ProspectivePage & {
+  img: HTMLImageElement | HTMLCanvasElement;
 };
 
 const pages: Page[] = [];
@@ -148,8 +148,8 @@ const adjustLine = (elem: HTMLDivElement, a: Point, b: Point, scale: number) => 
   elem.style.transform = `rotate(${Math.atan2(b.y - a.y, b.x - a.x)}rad)`;
 }
 
-const processPhoto = async (src: Blob | ImageBitmap) => {
-  let img: HTMLElement, data: ImageData;
+const preprocessPhoto = async (src: Blob | ImageBitmap) => {
+  let img: HTMLImageElement | HTMLCanvasElement, data: ImageData;
   if (src instanceof Blob) {
     const image = await toImage(src);
     img = image;
@@ -178,148 +178,206 @@ const processPhoto = async (src: Blob | ImageBitmap) => {
   clampPoint(quad.b);
   clampPoint(quad.c);
   clampPoint(quad.d);
-  const imgCrop = document.createElement('div');
-  imgCrop.style.display = 'flex';
-  imgCrop.style.justifyContent = 'center';
-  imgCrop.style.alignItems = 'center';
-  imgCrop.style.overflow = 'hidden';
-  const imgDoc = document.createElement('div');
-  imgDoc.style.position = 'relative';
-  imgDoc.appendChild(img);
-  imgCrop.appendChild(imgDoc);
-  modal.style.display = 'flex';
-  const aspectRatio = Math.max(data.width, data.height) / Math.min(data.width, data.height);
-  let scale = 0, docX = 0, docY = 0, landscape = false;
-  let prevElems: HTMLDivElement[] = [];
-  const makePoint = (src: Point, onUpdate: () => void) => {
-    const pt = point(src, scale);
-    let active = false;
-    const onDown = (evt: MouseEvent | TouchEvent, x: number, y: number) => {
-      if (evt.target == pt || (evt.target == img && Math.hypot(x - src.x * scale, y - src.y * scale) < Math.min(window.innerWidth, window.innerHeight) * 0.2)) {
-        evt.stopImmediatePropagation();
-        active = true;
-        onMove(x, y);
-      } else if (pt.parentElement != imgDoc) {
-        imgDoc.removeEventListener('mousedown', onMouseDown);
-        imgDoc.removeEventListener('touchstart', onTouchStart);
-        imgDoc.removeEventListener('mousemove', onMouseMove);
-        imgDoc.removeEventListener('touchmove', onTouchMove);
-        imgDoc.removeEventListener('mouseup', onUp);
-        imgDoc.removeEventListener('touchend', onUp);
-      }
-    };
-    const onMove = (x: number, y: number) => {
-      src.x = x / scale;
-      src.y = y / scale;
-      adjustPoint(pt, src, scale);
-      onUpdate();
-    };
-    const onUp = () => {
-      active = false;
-    };
-    const onMouseDown = (e: MouseEvent) => {
-      onDown(e, e.clientX - docX, e.clientY - docY);
-    };
-    imgDoc.addEventListener('mousedown', onMouseDown);
-    const onTouchStart = (e: TouchEvent) => {
-      const touch = e.targetTouches[0];
-      onDown(e, touch.clientX - docX, touch.clientY - docY);
-    }
-    imgDoc.addEventListener('touchstart', onTouchStart);
-    const onMouseMove = (e: MouseEvent) => {
-      if (active) {
-        e.preventDefault();
-        onMove(e.clientX - docX, e.clientY - docY);
-      }
-    };
-    imgDoc.addEventListener('mousemove', onMouseMove);
-    const onTouchMove = (e: TouchEvent) => {
-      if (active) {
-        const touch = e.targetTouches[0];
-        e.preventDefault();
-        onMove(touch.clientX - docX, touch.clientY - docY);
-      }
-    }
-    imgDoc.addEventListener('touchmove', onTouchMove);
-    imgDoc.addEventListener('mouseup', onUp);
-    imgDoc.addEventListener('touchend', onUp);
-    return pt;
-  }
-  const paintLines = () => {
-    for (const elem of prevElems) {
-      imgDoc.removeChild(elem);
-    }
-    const ab = line(quad.a, quad.b, scale);
-    const bc = line(quad.b, quad.c, scale);
-    const cd = line(quad.c, quad.d, scale);
-    const da = line(quad.d, quad.a, scale);
-    prevElems = [
-      imgDoc.appendChild(ab),
-      imgDoc.appendChild(bc),
-      imgDoc.appendChild(cd),
-      imgDoc.appendChild(da),
-      imgDoc.appendChild(makePoint(quad.a, () => {
-        adjustLine(da, quad.d, quad.a, scale);
-        adjustLine(ab, quad.a, quad.b, scale);
-      })),
-      imgDoc.appendChild(makePoint(quad.b, () => {
-        adjustLine(ab, quad.a, quad.b, scale);
-        adjustLine(bc, quad.b, quad.c, scale);
-      })),
-      imgDoc.appendChild(makePoint(quad.c, () => {
-        adjustLine(bc, quad.b, quad.c, scale);
-        adjustLine(cd, quad.c, quad.d, scale);
-      })),
-      imgDoc.appendChild(makePoint(quad.d, () => {
-        adjustLine(cd, quad.c, quad.d, scale);
-        adjustLine(da, quad.d, quad.a, scale);
-      })),
-    ];
-  };
-  const updateImageDimensions = () => {
-    const { width, height } = calcDimensions(aspectRatio, 0.925);
-    const cssWidth = width + 'px';
-    const cssHeight = height + 'px';
-    landscape = isLandscape(aspectRatio);
-    if (landscape) {
-      img.style.width = '';
-      img.style.height = cssHeight;
-      scale = window.innerHeight / data.height;
-    } else {
-      img.style.width = cssWidth;
-      img.style.height = '';
-      scale = window.innerWidth / data.width;
-    }
-    imgCrop.style.width = imgCrop.style.minWidth = cssWidth;
-    imgCrop.style.height = imgCrop.style.minHeight = cssHeight;
-    queueMicrotask(() => {
-      const { left, top } = imgDoc.getBoundingClientRect();
-      docX = left;
-      docY = top;
-      paintLines();
-    });
-  };
-  updateImageDimensions();
-  captures.appendChild(imgCrop);
-  const offResize = onResize(updateImageDimensions);
+  return { img, data, quad };
+};
 
-  return new Promise<void>(resolve => {
-    const onDone = () => {
-      pages.push({ page: { data, quad } });
-      finish();
+const processPhotos = async (srcs: (Blob | ImageBitmap | Page)[]) => {
+  const results = srcs.map(src => src instanceof Blob || src instanceof ImageBitmap ? preprocessPhoto(src) : src);
+  const cbs: ((check: boolean) => void)[] = [];
+  let firstDimensions = { width: 0, height: 0 };
+  let landscape = false;
+  for (const result of results) {
+    const isFirst = result == results[0];
+    const isLast = result == results[results.length - 1];
+    const { img, data, quad } = await result;
+    const imgCrop = document.createElement('div');
+    imgCrop.style.display = 'flex';
+    imgCrop.style.justifyContent = 'center';
+    imgCrop.style.alignItems = 'center';
+    imgCrop.style.overflow = 'hidden';
+    imgCrop.style.scrollSnapAlign = 'center';
+    const imgDoc = document.createElement('div');
+    imgDoc.style.position = 'relative';
+    imgDoc.appendChild(img);
+    imgCrop.appendChild(imgDoc);
+    modal.style.display = 'flex';
+    const aspectRatio = Math.max(data.width, data.height) / Math.min(data.width, data.height);
+    let scale = 0, docX = 0, docY = 0, latestDims = false;
+    let prevElems: HTMLDivElement[] = [];
+    const getLatestDims = () => {
+      if (!latestDims) {
+        const { left, top } = imgDoc.getBoundingClientRect();
+        docX = left;
+        docY = top;
+        latestDims = true; 
+      }
+    }
+    const makePoint = (src: Point, onUpdate: () => void) => {
+      const pt = point(src, scale);
+      let active = false;
+      const onDown = (evt: MouseEvent | TouchEvent, x: number, y: number) => {
+        if (pt.parentElement == imgDoc) {
+          if (evt.target == pt || (evt.target == img && Math.hypot(x - src.x * scale, y - src.y * scale) < Math.min(window.innerWidth, window.innerHeight) * 0.2)) {
+            evt.stopImmediatePropagation();
+            active = true;
+            onMove(x, y);
+          }
+        } else {
+          imgDoc.removeEventListener('mousedown', onMouseDown);
+          imgDoc.removeEventListener('touchstart', onTouchStart);
+          imgDoc.removeEventListener('mousemove', onMouseMove);
+          imgDoc.removeEventListener('touchmove', onTouchMove);
+          imgDoc.removeEventListener('mouseup', onUp);
+          imgDoc.removeEventListener('touchend', onUp);
+        }
+      };
+      const onMove = (x: number, y: number) => {
+        src.x = x / scale;
+        src.y = y / scale;
+        adjustPoint(pt, src, scale);
+        onUpdate();
+      };
+      const onUp = () => {
+        active = false;
+      };
+      const onMouseDown = (e: MouseEvent) => {
+        getLatestDims();
+        onDown(e, e.pageX - docX, e.pageY - docY);
+      };
+      imgDoc.addEventListener('mousedown', onMouseDown);
+      const onTouchStart = (e: TouchEvent) => {
+        const touch = e.targetTouches[0];
+        getLatestDims();
+        onDown(e, touch.pageX - docX, touch.pageY - docY);
+      }
+      imgDoc.addEventListener('touchstart', onTouchStart);
+      const onMouseMove = (e: MouseEvent) => {
+        if (active) {
+          e.preventDefault();
+          onMove(e.pageX - docX, e.pageY - docY);
+        }
+      };
+      imgDoc.addEventListener('mousemove', onMouseMove);
+      const onTouchMove = (e: TouchEvent) => {
+        if (active) {
+          const touch = e.targetTouches[0];
+          e.preventDefault();
+          onMove(touch.pageX - docX, touch.pageY - docY);
+        }
+      }
+      imgDoc.addEventListener('touchmove', onTouchMove);
+      imgDoc.addEventListener('mouseup', onUp);
+      imgDoc.addEventListener('touchend', onUp);
+      return pt;
+    }
+    const paintLines = () => {
+      for (const elem of prevElems) {
+        imgDoc.removeChild(elem);
+      }
+      const ab = line(quad.a, quad.b, scale);
+      const bc = line(quad.b, quad.c, scale);
+      const cd = line(quad.c, quad.d, scale);
+      const da = line(quad.d, quad.a, scale);
+      prevElems = [
+        imgDoc.appendChild(ab),
+        imgDoc.appendChild(bc),
+        imgDoc.appendChild(cd),
+        imgDoc.appendChild(da),
+        imgDoc.appendChild(makePoint(quad.a, () => {
+          adjustLine(da, quad.d, quad.a, scale);
+          adjustLine(ab, quad.a, quad.b, scale);
+        })),
+        imgDoc.appendChild(makePoint(quad.b, () => {
+          adjustLine(ab, quad.a, quad.b, scale);
+          adjustLine(bc, quad.b, quad.c, scale);
+        })),
+        imgDoc.appendChild(makePoint(quad.c, () => {
+          adjustLine(bc, quad.b, quad.c, scale);
+          adjustLine(cd, quad.c, quad.d, scale);
+        })),
+        imgDoc.appendChild(makePoint(quad.d, () => {
+          adjustLine(cd, quad.c, quad.d, scale);
+          adjustLine(da, quad.d, quad.a, scale);
+        })),
+      ];
     };
-    const onCancel = () => {
-      finish();
+    const updateImageDimensions = () => {
+      const { width, height } = isFirst ? calcDimensions(aspectRatio, 0.925) : firstDimensions;
+      if (isFirst) {
+        landscape = isLandscape(aspectRatio);
+        firstDimensions = { width, height };
+        modalCancelWrapper.style.width = modalCancelWrapper.style.height = modalDoneWrapper.style.width = modalDoneWrapper.style.height = (landscape ? window.innerWidth : window.innerHeight) * 0.035 + 'px';
+        modalCancelWrapper.style.margin = modalDoneWrapper.style.margin = (landscape ? window.innerWidth : window.innerHeight) * 0.02 + 'px';
+        captures.style.width = modal.style.width = window.innerWidth + 'px';
+        captures.style.height = modal.style.height = window.innerHeight + 'px';
+        modal.style.flexDirection = landscape ? 'row' : 'column';
+        captures.style.flexDirection = landscape ? 'column' : 'row';
+        if (landscape) {
+          modalBottomWrapper.style.flexDirection = 'column';
+          modalBottomWrapper.style.height = window.innerHeight + 'px';
+          modalBottomWrapper.style.width = ''; 
+        } else {
+          modalBottomWrapper.style.flexDirection = 'row';
+          modalBottomWrapper.style.height = '';
+          modalBottomWrapper.style.width = window.innerWidth + 'px';   
+        }
+      }
+      const cssWidth = width + 'px';
+      const cssHeight = height + 'px';
+    
+      if (landscape) {
+        img.style.width = '';
+        img.style.height = cssHeight;
+        scale = window.innerHeight / data.height;
+      } else {
+        img.style.width = cssWidth;
+        img.style.height = '';
+        scale = window.innerWidth / data.width;
+      }
+      imgCrop.style.width = imgCrop.style.minWidth = cssWidth;
+      imgCrop.style.height = imgCrop.style.minHeight = cssHeight;
+      latestDims = false;
+      paintLines();
     };
+    updateImageDimensions();
+    captures.appendChild(imgCrop);
+    const offResize = onResize(updateImageDimensions);
+    cbs.push(check => {
+      if (check) {
+        pages.push({ data, quad, img });
+        doneWrapper.style.opacity = '';
+        if (isLast) {
+          if (img.width > img.height) {
+            img.style.height = pastWrapper.style.height;
+            img.style.width = '';
+          } else {
+            img.style.height = '';
+            img.style.width = pastWrapper.style.width;
+          }
+          while (pastWrapper.lastChild != past) {
+            pastWrapper.removeChild(pastWrapper.lastChild!);
+          }
+          pastWrapper.appendChild(img);
+        }
+      }
+      offResize();
+      captures.removeChild(imgCrop);
+    })
+  }
+
+  return new Promise(resolve => {
+    const onDone = () => finish(true);
+    const onCancel = () => finish(false);
     modalCancel.addEventListener('click', onCancel);
     modalDone.addEventListener('click', onDone);
-    const finish = () => {
+    const finish = (check: boolean) => {
       modalDone.removeEventListener('click', onDone);
       modalCancel.removeEventListener('click', onCancel);
       modal.style.display = 'none';
-      captures.removeChild(imgCrop);
-      offResize();
-      resolve();
+      for (const cb of cbs) {
+        cb(check);
+      }
+      resolve(check);
     };
   });
 }
@@ -333,9 +391,9 @@ const calcDimensions = (aspectRatio: number, maxRatio: number) => {
   return { width, height };
 }
 
-const sideWrappers = [topWrapper, bottomWrapper, modalBottomWrapper];
-const topElems = [flashWrapper, qualityWrapper, githubWrapper, selectWrapper];
-const bottomElems = [doneWrapper, uploadWrapper, modalCancelWrapper, modalDoneWrapper];
+const sideWrappers = [topWrapper, bottomWrapper];
+const topElems = [flashWrapper, qualityWrapper, githubWrapper, selectWrapper, pastWrapper];
+const bottomElems = [doneWrapper, uploadWrapper];
 const allElems = topElems.concat(bottomElems, shutter);
 
 const startStream = async (device?: string) => {
@@ -347,11 +405,11 @@ const startStream = async (device?: string) => {
   const cssWidth = width + 'px';
   previewCrop.style.width = previewCrop.style.minWidth = cssWidth;
   previewCrop.style.height = previewCrop.style.minHeight = cssHeight;
-  modal.style.width = root.style.width = window.innerWidth + 'px';
-  modal.style.height = root.style.height = window.innerHeight + 'px';
+  root.style.width = window.innerWidth + 'px';
+  root.style.height = window.innerHeight + 'px';
   for (const sideWrapper of sideWrappers) {
     if (landscape) {
-      sideWrapper.style.flexDirection = sideWrapper == topWrapper ? 'column-reverse' : 'column';
+      sideWrapper.style.flexDirection = 'column';
       sideWrapper.style.height = window.innerHeight + 'px';
       sideWrapper.style.width = '';
     } else {
@@ -370,14 +428,17 @@ const startStream = async (device?: string) => {
     elem.style.margin = (landscape ? window.innerWidth : window.innerHeight) * 0.02 + 'px';
   }
   shutter.style.width = shutter.style.height = (landscape ? window.innerWidth : window.innerHeight) * 0.05 + 'px';
+  const pastBorderSize = (landscape ? window.innerWidth : window.innerHeight) * 0.002 + 'px';
+  pastWrapper.style.borderRadius = pastBorderSize;
+  pastWrapper.style.border = pastBorderSize + ' solid white';
   if (landscape) {
     preview.style.height = cssHeight;
     preview.style.width = '';
-    modal.style.flexDirection = root.style.flexDirection = 'row';
+    root.style.flexDirection = 'row';
   } else {
     preview.style.height = '';
     preview.style.width = cssWidth;
-    modal.style.flexDirection = root.style.flexDirection = 'column';
+    root.style.flexDirection = 'column';
   }
   const constraints: MediaTrackConstraints = {
     width: maxRes.width, 
@@ -398,11 +459,14 @@ const startStream = async (device?: string) => {
     };
     newElems.length = 0;
   }
-  let resume = () => {};
   const onMetadata = () => {
     const scale = landscape ? window.innerHeight / preview.videoHeight : window.innerWidth / preview.videoWidth;
     const docPreview = async () => {
-      let quad = await findDocument(await getData(await cap.grabFrame()), true);
+      let quad: Quad | undefined;
+      const ts = performance.now();
+      if (modal.style.display == 'none') {
+        quad = await findDocument(await getData(await cap.grabFrame()), true);
+      }
       clearNewElems();
       if (docPreviewTimeout != -1) {
         if (quad) {
@@ -413,17 +477,10 @@ const startStream = async (device?: string) => {
             previewDoc.appendChild(line(quad.d, quad.a, scale))
           ];
         }
-        docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
+        docPreviewTimeout = setTimeout(docPreview, Math.max(250 - performance.now() + ts, 0)) as unknown as number;
       }
     };
-    resume = () => {
-      docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
-    };
-    resume();
-  };
-  const pause = () => {
-    clearTimeout(docPreviewTimeout);
-    docPreviewTimeout = -1;
+    docPreviewTimeout = setTimeout(docPreview, 0) as unknown as number;
   };
   preview.addEventListener('loadedmetadata', onMetadata);
   const cap = new ImageCapture(videoTrack);
@@ -440,20 +497,15 @@ const startStream = async (device?: string) => {
     preview.style.opacity = '0';
     setTimeout(() => preview.style.opacity = '', 50);
   };
-  let processing = false;
   const onShutterClick = async () => {
-    if (!processing) {
+    if (shutter.style.opacity == '') {
       shutter.style.opacity = '0.5';
-      processing = true;
       shutterFlash();
       try {
         const photo = hd ? await cap.takePhoto() : await cap.grabFrame();
-        pause();
-        await processPhoto(photo);
-        resume();
+        await processPhotos([photo]);
       } catch (e) {}
-      processing = false;
-      shutter.style.opacity = '1';
+      shutter.style.opacity = '';
     }
   };
   shutter.addEventListener('click', onShutterClick);
@@ -472,7 +524,8 @@ const startStream = async (device?: string) => {
   return {
     deviceId: maxRes.deviceId,
     close() {
-      pause();
+      clearTimeout(docPreviewTimeout);
+      docPreviewTimeout = -1;
       shutter.removeEventListener('click', onShutterClick);
       flash.removeEventListener('click', onFlashClick);
       quality.removeEventListener('click', onQualityClick);
@@ -515,13 +568,40 @@ const onLoad = async () => {
   select.onchange = update;
   onResize(update);
   upload.onchange = async () => {
-    for (const file of upload.files!) {
-      await processPhoto(file);
-    }
+    shutter.style.opacity = '0.5';
+    await processPhotos([...upload.files!]);
+    shutter.style.opacity = '';
   };
   done.onclick = async () => {
-    download(new Blob([await toPDF(await Promise.all(pages.map(({ page }) => extractDocument(page.data, page.quad, 1224, true))))]), 'out.pdf')
-    pages.length = 0;
+    if (pages.length) {
+      doneWrapper.style.opacity = '0.5';
+      while (pastWrapper.lastChild != past) {
+        pastWrapper.removeChild(pastWrapper.lastChild!);
+      }
+      download(new Blob([await toPDF(await Promise.all(pages.map(({ data, quad }) => extractDocument(data, quad, 1224, true))))]), 'out.pdf')
+      pages.length = 0;
+    }
+  }
+  past.onclick = async () => {
+    if (pages.length) {
+      const currPages = pages.slice();
+      pages.length = 0;
+      if (!(await processPhotos(currPages))) {
+        pages.push(...currPages);
+        const { img } = currPages[currPages.length - 1];
+        if (img.width > img.height) {
+          img.style.height = pastWrapper.style.height;
+          img.style.width = '';
+        } else {
+          img.style.height = '';
+          img.style.width = pastWrapper.style.width;
+        }
+        while (pastWrapper.lastChild != past) {
+          pastWrapper.removeChild(pastWrapper.lastChild!);
+        }
+        pastWrapper.appendChild(img);
+      }
+    }
   }
 }
 

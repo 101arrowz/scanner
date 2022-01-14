@@ -16,6 +16,10 @@
             width: 100vw;
             height: 100vh;
         }
+        #captures::-webkit-scrollbar {
+            width: 0;
+            height: 0;
+        }
     </style>
 </head>
 <body>
@@ -37,6 +41,9 @@
                 <button id="flash" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></button>
                 <img id="flash-img" style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="flash-off.svg"></img>
             </div>
+            <div id="past-wrapper" style="position: relative; height: 3vh; width: 3vh; overflow: hidden; box-sizing: border-box; border: 0.2vh solid white; border-radius: 0.2vh; display: flex; justify-content: center; align-items: center;">
+                <button id="past" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></button>
+            </div>
         </div>
         <div id="preview-crop" style="display: flex; justify-content: center; align-items: center; overflow: hidden;">
             <div id="preview-doc" style="position: relative">
@@ -49,7 +56,7 @@
                 <img style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="upload.svg"></img>
             </div>
             <img id="shutter" style="cursor: pointer; height: 5vh;" src="camera.svg"></img>
-            <div id="done-wrapper" style="position: relative; height: 3.5vh; width: 3.5vh;">
+            <div id="done-wrapper" style="position: relative; height: 3.5vh; width: 3.5vh; opacity: 0.5;">
                 <button id="done" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></button>
                 <img style="position: absolute; top: 0; left: 0; cursor: pointer; height: 100%; z-index: 1" src="done.svg"></img>
             </div>
@@ -57,7 +64,7 @@
     </div>
     <div id="modal" style="display: none; flex-direction: column; justify-content: space-between; align-items: center; position: absolute; top: 0; left: 0; z-index: 3; background: black;">
         <div></div>
-        <div id="captures" style="display: flex; flex-direction: row; justify-content: center; align-items: center; scroll-snap-type: x mandatory;"></div>
+        <div id="captures" style="display: flex; flex-direction: row; align-items: center; overflow: scroll; scrollbar-width: none; scroll-snap-type: both mandatory;"></div>
         <div id="modal-bottom-wrapper" style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100vw;">
             <div id="modal-cancel-wrapper" style="position: relative; height: 3.5vh; width: 3.5vh;">
                 <button id="modal-cancel" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%; opacity: 0; z-index: 2; cursor: pointer;"></button>
