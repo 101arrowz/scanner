@@ -578,7 +578,7 @@ const onLoad = async () => {
       while (pastWrapper.lastChild != past) {
         pastWrapper.removeChild(pastWrapper.lastChild!);
       }
-      download(new Blob([await toPDF(await Promise.all(pages.map(({ data, quad }) => extractDocument(data, quad, 1224))))]), 'out.pdf')
+      download(new Blob([await toPDF(await Promise.all(pages.map(({ data, quad }) => extractDocument(data, quad, 1224, true))))]), 'out.pdf')
       pages.length = 0;
     }
   }
