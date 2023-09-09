@@ -1,0 +1,40 @@
+(()=>{let e;function t(e,t,r,n){Object.defineProperty(e,t,{get:r,set:n,enumerable:!0,configurable:!0})}var r="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof self?self:"undefined"!=typeof window?window:"undefined"!=typeof global?global:{},n={},a={},i=r.parcelRequireed96;null==i&&((i=function(e){if(e in n)return n[e].exports;if(e in a){var t=a[e];delete a[e];var r={id:e,exports:{}};return n[e]=r,t.call(r.exports,r,r.exports),r.exports}var i=Error("Cannot find module '"+e+"'");throw i.code="MODULE_NOT_FOUND",i}).register=function(e,t){a[e]=t},r.parcelRequireed96=i),i.register("bGWGM",function(e,r){t(e.exports,"register",()=>n,e=>n=e),t(e.exports,"resolve",()=>a,e=>a=e);var n,a,i={};n=function(e){for(var t=Object.keys(e),r=0;r<t.length;r++)i[t[r]]=e[t[r]]},a=function(e){var t=i[e];if(null==t)throw Error("Could not resolve bundle with id "+e);return t}}),i.register("8IoA4",function(e,r){t(e.exports,"getBundleURL",()=>n,e=>n=e);var n,a={};n=function(e){var t=a[e];return t||(t=function(){try{throw Error()}catch(t){var e=(""+t.stack).match(/(https?|file|ftp|(chrome|moz|safari-web)-extension):\/\/[^)\n]+/g);if(e)// Use the 3rd one, which will be a runtime in the original bundle.
+return(""+e[2]).replace(/^((?:https?|file|ftp|(chrome|moz|safari-web)-extension):\/\/.+)\/[^/]+$/,"$1")+"/"}return"/"}(),a[e]=t),t}}),i("bGWGM").register(JSON.parse('{"a2Cve":"process.8010e3f6.js","4w3KO":"scanner_bg.0b3074af.wasm"}'));let o=Array(32).fill(void 0);o.push(void 0,null,!0,!1);let s=o.length;function l(e){let t=o[e];return e<36||(o[e]=s,s=e),t}let u=0,_=null;function c(){return(null===_||_.buffer!==e.memory.buffer)&&(_=new Uint8Array(e.memory.buffer)),_}let f=new TextEncoder("utf-8"),g="function"==typeof f.encodeInto?function(e,t){return f.encodeInto(e,t)}:function(e,t){let r=f.encode(e);return t.set(r),{read:e.length,written:r.length}},b=null;function d(){return(null===b||b.buffer!==e.memory.buffer)&&(b=new Int32Array(e.memory.buffer)),b}let p=new TextDecoder("utf-8",{ignoreBOM:!0,fatal:!0});function w(e,t){if(!(e instanceof t))throw Error(`expected instance of ${t.name}`);return e.ptr}function y(e){s===o.length&&o.push(o.length+1);let t=s;return s=o[t],o[t]=e,t}p.decode();let h=null;class m{static __wrap(e){let t=Object.create(m.prototype);return t.ptr=e,t}__destroy_into_raw(){let e=this.ptr;return this.ptr=0,e}free(){let t=this.__destroy_into_raw();e.__wbg_point_free(t)}/**
+    */get x(){return e.__wbg_get_point_x(this.ptr)}/**
+    * @param {number} arg0
+    */set x(t){e.__wbg_set_point_x(this.ptr,t)}/**
+    */get y(){return e.__wbg_get_point_y(this.ptr)}/**
+    * @param {number} arg0
+    */set y(t){e.__wbg_set_point_y(this.ptr,t)}}class v{static __wrap(e){let t=Object.create(v.prototype);return t.ptr=e,t}__destroy_into_raw(){let e=this.ptr;return this.ptr=0,e}free(){let t=this.__destroy_into_raw();e.__wbg_quad_free(t)}/**
+    */get a(){var t=e.__wbg_get_quad_a(this.ptr);return m.__wrap(t)}/**
+    * @param {Point} arg0
+    */set a(t){w(t,m);var r=t.ptr;t.ptr=0,e.__wbg_set_quad_a(this.ptr,r)}/**
+    */get b(){var t=e.__wbg_get_quad_b(this.ptr);return m.__wrap(t)}/**
+    * @param {Point} arg0
+    */set b(t){w(t,m);var r=t.ptr;t.ptr=0,e.__wbg_set_quad_b(this.ptr,r)}/**
+    */get c(){var t=e.__wbg_get_quad_c(this.ptr);return m.__wrap(t)}/**
+    * @param {Point} arg0
+    */set c(t){w(t,m);var r=t.ptr;t.ptr=0,e.__wbg_set_quad_c(this.ptr,r)}/**
+    */get d(){var t=e.__wbg_get_quad_d(this.ptr);return m.__wrap(t)}/**
+    * @param {Point} arg0
+    */set d(t){w(t,m);var r=t.ptr;t.ptr=0,e.__wbg_set_quad_d(this.ptr,r)}/**
+    * @param {number} ax
+    * @param {number} ay
+    * @param {number} bx
+    * @param {number} by
+    * @param {number} cx
+    * @param {number} cy
+    * @param {number} dx
+    * @param {number} dy
+    */constructor(t,r,n,a,i,o,s,l){var u=e.quad_new(t,r,n,a,i,o,s,l);return v.__wrap(u)}}async function x(e,t){if("function"==typeof Response&&e instanceof Response){if("function"==typeof WebAssembly.instantiateStreaming)try{return await WebAssembly.instantiateStreaming(e,t)}catch(t){if("application/wasm"!=e.headers.get("Content-Type"))console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n",t);else throw t}let r=await e.arrayBuffer();return await WebAssembly.instantiate(r,t)}{let r=await WebAssembly.instantiate(e,t);return r instanceof WebAssembly.Instance?{instance:r,module:e}:r}}var A={};async function O(t){void 0===t&&(t=new URL(A));let r={};r.wbg={},r.wbg.__wbg_newwithu8clampedarrayandsh_1b8c6e1bede43657=function(){return function(t,r){try{return t.apply(this,r)}catch(t){e.__wbindgen_exn_store(y(t))}}(function(t,r,n,a){return y(new ImageData(((null===h||h.buffer!==e.memory.buffer)&&(h=new Uint8ClampedArray(e.memory.buffer)),h).subarray(t/1,t/1+r),n>>>0,a>>>0))},arguments)},r.wbg.__wbindgen_object_drop_ref=function(e){l(e)},r.wbg.__wbg_width_16bd64d09cbf5661=function(e){return o[e].width},r.wbg.__wbg_height_368bb86c37d51bc9=function(e){return o[e].height},r.wbg.__wbg_data_1ae7496c58caf755=function(t,r){var n=function(e,t){let r=t(1*e.length);return c().set(e,r/1),u=e.length,r}(o[r].data,e.__wbindgen_malloc),a=u;d()[t/4+1]=a,d()[t/4+0]=n},r.wbg.__wbindgen_debug_string=function(t,r){var n=function(e,t,r){if(void 0===r){let r=f.encode(e),n=t(r.length);return c().subarray(n,n+r.length).set(r),u=r.length,n}let n=e.length,a=t(n),i=c(),o=0;for(;o<n;o++){let t=e.charCodeAt(o);if(t>127)break;i[a+o]=t}if(o!==n){0!==o&&(e=e.slice(o)),a=r(a,n,n=o+3*e.length);let t=c().subarray(a+o,a+n),i=g(e,t);o+=i.written}return u=o,a}(function e(t){let r;// primitive types
+let n=typeof t;if("number"==n||"boolean"==n||null==t)return`${t}`;if("string"==n)return`"${t}"`;if("symbol"==n){let e=t.description;return null==e?"Symbol":`Symbol(${e})`}if("function"==n){let e=t.name;return"string"==typeof e&&e.length>0?`Function(${e})`:"Function"}// objects
+if(Array.isArray(t)){let r=t.length,n="[";r>0&&(n+=e(t[0]));for(let a=1;a<r;a++)n+=", "+e(t[a]);return n+"]"}// Test for built-in
+let a=/\[object ([^\]]+)\]/.exec(toString.call(t));if(!(a.length>1))return toString.call(t);if("Object"==(r=a[1]))// JSON.stringify avoids problems with cycles, and is generally much
+// easier than looping through ownProperties of `val`.
+try{return"Object("+JSON.stringify(t)+")"}catch(e){return"Object"}return(// errors
+t instanceof Error?`${t.name}: ${t.message}
+${t.stack}`:r)}(o[r]),e.__wbindgen_malloc,e.__wbindgen_realloc),a=u;d()[t/4+1]=a,d()[t/4+0]=n},r.wbg.__wbindgen_throw=function(e,t){throw Error(p.decode(c().subarray(e,e+t)))},("string"==typeof t||"function"==typeof Request&&t instanceof Request||"function"==typeof URL&&t instanceof URL)&&(t=fetch(t));let{instance:n,module:a}=await x(await t,r);return e=n.exports,O.__wbindgen_wasm_module=a,e}A=i("8IoA4").getBundleURL("a2Cve")+i("bGWGM").resolve("4w3KO");let E=t=>{var r,n,a,i,o,s;if("find-document"==t.type){// const ts = performance.now();
+let a=(r=t.data,0===(n=e.find_document(y(r)))?void 0:v.__wrap(n));// console.log('find_document:', (performance.now() - ts) + 'ms')
+return{result:a&&{a:{x:a.a.x,y:a.a.y},b:{x:a.b.x,y:a.b.y},c:{x:a.c.x,y:a.c.y},d:{x:a.d.x,y:a.d.y}}}}if("extract-document"==t.type){let{a:r,b:n,c:u,d:_}=t.region,c=new v(r.x,r.y,n.x,n.y,u.x,u.y,_.x,_.y),f=(a=t.data,i=t.targetWidth,o=t.targetHeight,w(c,v),s=c.ptr,c.ptr=0,l(e.extract_document(y(a),s,i,null!=o,null==o?0:o)));return{result:f}}if("get-data"==t.type){let{width:e,height:r}=t.bitmap,n=new OffscreenCanvas(e,r),a=n.getContext("2d");a.drawImage(t.bitmap,0,0);let i=a.getImageData(0,0,e,r);return{result:i}}throw TypeError("invalid message")},q=O().catch(()=>{});self.onmessage=async e=>{await q;let{msg:t,...r}=e.data;try{let{result:e,transfer:n}=E(t);self.postMessage({result:e,...r},n||[])}catch(e){e instanceof Error||(e=Error(`Error in process worker: ${e}`)),self.postMessage({error:{message:e.message,stack:e.stack,name:e.name},...r})}}})();//# sourceMappingURL=process.8010e3f6.js.map
+
+//# sourceMappingURL=process.8010e3f6.js.map
