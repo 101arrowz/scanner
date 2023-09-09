@@ -7,5 +7,5 @@
     "noEmit": true
   },
   "include": ["src"],
-  "exclude": ["src/workers"]
+  "exclude": ["src/workers/**/*"]
 }

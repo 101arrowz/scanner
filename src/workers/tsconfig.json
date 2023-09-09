@@ -5,7 +5,8 @@
     "module": "ESNext",
     "moduleResolution": "node",
     "noEmit": true,
-    "lib": ["ESNext", "WebWorker"]
+    "lib": ["ESNext", "WebWorker"],
+    "typeRoots": []
   },
   "include": ["."]
 }

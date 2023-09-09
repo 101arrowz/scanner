@@ -1,4 +1,4 @@
-import { Message, Messages, Quad, Point } from './workers/process';
+import type { Message, Messages, Quad, Point } from './workers/ipc';
 
 const newWorker = () => new Worker(new URL('./workers/process.ts', import.meta.url), { type: 'module' });
 

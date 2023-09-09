@@ -1,37 +1,7 @@
 import init, { find_document, extract_document, Quad as WasmQuad } from '../../pkg/scanner';
+import { Message, Messages } from './ipc'
 
-export type Point = {
-  x: number;
-  y: number;
-}
-
-export type Quad = {
-  a: Point;
-  b: Point;
-  c: Point;
-  d: Point;
-};
-
-export type Messages = {
-  'find-document': [{
-    data: ImageData;
-  }, Quad | undefined];
-  'extract-document': [{
-    data: ImageData;
-    region: Quad;
-    targetWidth: number;
-    targetHeight?: number;
-  }, ImageData];
-  'get-data': [{
-    bitmap: ImageBitmap;
-  }, ImageData];
-};
-
-export type Message = {
-  [T in keyof Messages]: {
-    type: T;
-  } & Messages[T][0];
-}[keyof Messages];
+declare const self: DedicatedWorkerGlobalScope
 
 const handle = <T extends Message>(message: T): { result: Messages[T['type']][1]; transfer?: Transferable[] } => {
   if (message.type == 'find-document') {
@@ -77,17 +47,17 @@ const handle = <T extends Message>(message: T): { result: Messages[T['type']][1]
 
 let load = init().catch(() => {});
 
-onmessage = async evt => {
+self.onmessage = async (evt: MessageEvent<{ msg: Message }>) => {
   await load;
   const { msg, ...data } = evt.data;
   try {
-    const { result, transfer } = handle(msg as Message);
-    postMessage({ result, ...data }, transfer || []);
+    const { result, transfer } = handle(msg);
+    self.postMessage({ result, ...data }, transfer || []);
   } catch (err) {
     if (!(err instanceof Error)) {
       err = new Error(`Error in process worker: ${err}`);
     }
-    postMessage({
+    self.postMessage({
       error: {
         message: (err as Error).message,
         stack: (err as Error).stack,

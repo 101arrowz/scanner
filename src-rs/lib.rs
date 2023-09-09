@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(int_abs_diff)]
 #[macro_use]
 extern crate alloc;
 
